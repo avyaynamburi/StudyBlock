@@ -1,0 +1,562 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		06AD7F1939F133BD782DC6A3 /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16EFC486EA1C65A0A5665FA3 /* StatsView.swift */; };
+		1194FE5650F254139756D87C /* FocusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7BC74A269960CCB0546F03 /* FocusView.swift */; };
+		22F7914D7B176C1B2713B445 /* HelperService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E0A955ADCDD5DA15A21225A /* HelperService.swift */; };
+		25B34A66A6EB6E848DB6FEC0 /* QuickAddParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDCFDE2EB502D6A6667AE2A5 /* QuickAddParser.swift */; };
+		2A49BC31BBBE283C4C6D2066 /* LockManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 253CE0B2FC09D36DB59CE68E /* LockManager.swift */; };
+		345A49C31AF209C6DB723AD2 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D1332D7311D10CC6ACA1C1 /* main.swift */; };
+		35BB5609F9BFCEDE03FD2A1E /* SRS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7754525C1D5F902DCF336FC7 /* SRS.swift */; };
+		4BB39EA0E8C536C79379F58E /* AppBlockerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 748878EFF97E8CA6409A91FF /* AppBlockerController.swift */; };
+		5DC02319A2A8A37F47441DC9 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2381BD64B1599ECBCEFACAD8 /* TasksView.swift */; };
+		72AB29B346C8349E25C453F2 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 816AA84E5D495AC6CA4F1B0D /* MainView.swift */; };
+		77D235AA45D343AFA6F2F3FC /* BlockerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A55586D872288090B8FDCB7F /* BlockerViewModel.swift */; };
+		7D7B549B0B24A3C6BEC58ED2 /* TaskModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E217CFD65651DB8324D7E49 /* TaskModels.swift */; };
+		8F639E311CA37E5A961B3375 /* FlashcardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4293A5E2866288B3F02CAA17 /* FlashcardsView.swift */; };
+		91959D161D544D4ADD64F167 /* NotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 795C7BE89A106A4FDF0A1E15 /* NotesView.swift */; };
+		9601A4B2A0F3AA88B2ADD55C /* HelperProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D4BB5A9E238AE75E06BB168 /* HelperProtocol.swift */; };
+		9B9D7499C9DCAD9E435DF363 /* HelperClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AAA7BE9CB489F76A570BA23 /* HelperClient.swift */; };
+		A9DBBDC436F8EC2A0AB1D1E4 /* JSONStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 022683D3747A9A5FC1E311BD /* JSONStore.swift */; };
+		AE780669FA6B2DC0266F9CDA /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28B9FAEDE5D3A2BD72D0B3AC /* ReviewView.swift */; };
+		B49E83CBE11195E2CCB4A25C /* FocusTimerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71373A36F529CDAD6C454579 /* FocusTimerController.swift */; };
+		BB1D61D91744D1D24DF9FA8C /* NotesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7256454EF37267FE776084A3 /* NotesStore.swift */; };
+		DF1F557FA82EE6404AD7BC6B /* HelperProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D4BB5A9E238AE75E06BB168 /* HelperProtocol.swift */; };
+		E577920A0D44F148A681D5FD /* StudyBlockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A017348766EE8BFAD3ABB0B /* StudyBlockApp.swift */; };
+		EB6D8D8F2DDFE3DA0ABFB991 /* StatsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93B98A99B38DA421F0961E9 /* StatsStore.swift */; };
+		F29FA33661E4A9045912F4DB /* TaskStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 487952DFD2593A38882C1AA1 /* TaskStore.swift */; };
+		F2EF477B0354CEC94082F1CD /* DeckStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37BC36C7BD7969998EE919AC /* DeckStore.swift */; };
+		FB8227F863F0B70D8357ABAD /* HostsFileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22DACA0DB23953B1B9B7A7DD /* HostsFileManager.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		FAA4DF04E79CD2B9E44A69F3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AE12A36F7E8BD6EF574EC947 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 08DC1D16B482B2D040370CB5;
+			remoteInfo = StudyBlockHelper;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		01A2BDF1E11F73F6C14BA1DC /* StudyBlock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyBlock.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		022683D3747A9A5FC1E311BD /* JSONStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONStore.swift; sourceTree = "<group>"; };
+		16EFC486EA1C65A0A5665FA3 /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
+		21D1332D7311D10CC6ACA1C1 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		22DACA0DB23953B1B9B7A7DD /* HostsFileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostsFileManager.swift; sourceTree = "<group>"; };
+		2381BD64B1599ECBCEFACAD8 /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
+		253CE0B2FC09D36DB59CE68E /* LockManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockManager.swift; sourceTree = "<group>"; };
+		28B9FAEDE5D3A2BD72D0B3AC /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
+		37BC36C7BD7969998EE919AC /* DeckStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckStore.swift; sourceTree = "<group>"; };
+		3E0A955ADCDD5DA15A21225A /* HelperService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperService.swift; sourceTree = "<group>"; };
+		3E217CFD65651DB8324D7E49 /* TaskModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskModels.swift; sourceTree = "<group>"; };
+		4293A5E2866288B3F02CAA17 /* FlashcardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlashcardsView.swift; sourceTree = "<group>"; };
+		487952DFD2593A38882C1AA1 /* TaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStore.swift; sourceTree = "<group>"; };
+		4D4BB5A9E238AE75E06BB168 /* HelperProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperProtocol.swift; sourceTree = "<group>"; };
+		5AAA7BE9CB489F76A570BA23 /* HelperClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperClient.swift; sourceTree = "<group>"; };
+		6A017348766EE8BFAD3ABB0B /* StudyBlockApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyBlockApp.swift; sourceTree = "<group>"; };
+		6ABB7B120BD9B70F6BB3F18E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		71373A36F529CDAD6C454579 /* FocusTimerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusTimerController.swift; sourceTree = "<group>"; };
+		7256454EF37267FE776084A3 /* NotesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesStore.swift; sourceTree = "<group>"; };
+		748878EFF97E8CA6409A91FF /* AppBlockerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBlockerController.swift; sourceTree = "<group>"; };
+		7754525C1D5F902DCF336FC7 /* SRS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SRS.swift; sourceTree = "<group>"; };
+		795C7BE89A106A4FDF0A1E15 /* NotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesView.swift; sourceTree = "<group>"; };
+		816AA84E5D495AC6CA4F1B0D /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		9A7BC74A269960CCB0546F03 /* FocusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusView.swift; sourceTree = "<group>"; };
+		A55586D872288090B8FDCB7F /* BlockerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockerViewModel.swift; sourceTree = "<group>"; };
+		DB24CA0CB431DD2731E7E764 /* StudyBlockHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = StudyBlockHelper; sourceTree = BUILT_PRODUCTS_DIR; };
+		EDCFDE2EB502D6A6667AE2A5 /* QuickAddParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickAddParser.swift; sourceTree = "<group>"; };
+		F93B98A99B38DA421F0961E9 /* StatsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsStore.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		143DEA8CED6CDF17AB13BAE4 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				022683D3747A9A5FC1E311BD /* JSONStore.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		15229EB5BC91A7C5BA739269 /* Tasks */ = {
+			isa = PBXGroup;
+			children = (
+				EDCFDE2EB502D6A6667AE2A5 /* QuickAddParser.swift */,
+				3E217CFD65651DB8324D7E49 /* TaskModels.swift */,
+				487952DFD2593A38882C1AA1 /* TaskStore.swift */,
+				2381BD64B1599ECBCEFACAD8 /* TasksView.swift */,
+			);
+			path = Tasks;
+			sourceTree = "<group>";
+		};
+		19DDF95A54A1E45658CCE7D5 /* Flashcards */ = {
+			isa = PBXGroup;
+			children = (
+				37BC36C7BD7969998EE919AC /* DeckStore.swift */,
+				4293A5E2866288B3F02CAA17 /* FlashcardsView.swift */,
+				28B9FAEDE5D3A2BD72D0B3AC /* ReviewView.swift */,
+				7754525C1D5F902DCF336FC7 /* SRS.swift */,
+			);
+			path = Flashcards;
+			sourceTree = "<group>";
+		};
+		3E761647E49489C14891EE58 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				4D4BB5A9E238AE75E06BB168 /* HelperProtocol.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		432AD416A010B1CC79F4A71C /* Notes */ = {
+			isa = PBXGroup;
+			children = (
+				7256454EF37267FE776084A3 /* NotesStore.swift */,
+				795C7BE89A106A4FDF0A1E15 /* NotesView.swift */,
+			);
+			path = Notes;
+			sourceTree = "<group>";
+		};
+		5251F31EEB290055FF826049 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				01A2BDF1E11F73F6C14BA1DC /* StudyBlock.app */,
+				DB24CA0CB431DD2731E7E764 /* StudyBlockHelper */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C9CC6A77ED8E8C73724A1677 /* Focus */ = {
+			isa = PBXGroup;
+			children = (
+				748878EFF97E8CA6409A91FF /* AppBlockerController.swift */,
+				71373A36F529CDAD6C454579 /* FocusTimerController.swift */,
+				9A7BC74A269960CCB0546F03 /* FocusView.swift */,
+			);
+			path = Focus;
+			sourceTree = "<group>";
+		};
+		D8123258A70F2D44CE8ECA51 = {
+			isa = PBXGroup;
+			children = (
+				3E761647E49489C14891EE58 /* Shared */,
+				EB5EC8964CC55DD2FF374F38 /* StudyBlock */,
+				E5803DF10E282B039F65E5E4 /* StudyBlockHelper */,
+				5251F31EEB290055FF826049 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E5803DF10E282B039F65E5E4 /* StudyBlockHelper */ = {
+			isa = PBXGroup;
+			children = (
+				3E0A955ADCDD5DA15A21225A /* HelperService.swift */,
+				22DACA0DB23953B1B9B7A7DD /* HostsFileManager.swift */,
+				253CE0B2FC09D36DB59CE68E /* LockManager.swift */,
+				21D1332D7311D10CC6ACA1C1 /* main.swift */,
+			);
+			path = StudyBlockHelper;
+			sourceTree = "<group>";
+		};
+		E604425E8C8BA7580EE1149E /* Stats */ = {
+			isa = PBXGroup;
+			children = (
+				F93B98A99B38DA421F0961E9 /* StatsStore.swift */,
+				16EFC486EA1C65A0A5665FA3 /* StatsView.swift */,
+			);
+			path = Stats;
+			sourceTree = "<group>";
+		};
+		EB5EC8964CC55DD2FF374F38 /* StudyBlock */ = {
+			isa = PBXGroup;
+			children = (
+				A55586D872288090B8FDCB7F /* BlockerViewModel.swift */,
+				5AAA7BE9CB489F76A570BA23 /* HelperClient.swift */,
+				6ABB7B120BD9B70F6BB3F18E /* Info.plist */,
+				816AA84E5D495AC6CA4F1B0D /* MainView.swift */,
+				6A017348766EE8BFAD3ABB0B /* StudyBlockApp.swift */,
+				19DDF95A54A1E45658CCE7D5 /* Flashcards */,
+				C9CC6A77ED8E8C73724A1677 /* Focus */,
+				432AD416A010B1CC79F4A71C /* Notes */,
+				E604425E8C8BA7580EE1149E /* Stats */,
+				143DEA8CED6CDF17AB13BAE4 /* Support */,
+				15229EB5BC91A7C5BA739269 /* Tasks */,
+			);
+			path = StudyBlock;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		08DC1D16B482B2D040370CB5 /* StudyBlockHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6537C7F677880D6B9CDABBF2 /* Build configuration list for PBXNativeTarget "StudyBlockHelper" */;
+			buildPhases = (
+				C8D56F8225D74F7FAFD8682E /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = StudyBlockHelper;
+			packageProductDependencies = (
+			);
+			productName = StudyBlockHelper;
+			productReference = DB24CA0CB431DD2731E7E764 /* StudyBlockHelper */;
+			productType = "com.apple.product-type.tool";
+		};
+		88AACEB4CC4AE1B5B9453DA8 /* StudyBlock */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B49ADB8223052A7F225C5104 /* Build configuration list for PBXNativeTarget "StudyBlock" */;
+			buildPhases = (
+				66B4809CBE8796D9A4F512F6 /* Sources */,
+				580448D0013AD6CCD5CD8B97 /* Embed helper daemon */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				971E083491E95A32B54F1C12 /* PBXTargetDependency */,
+			);
+			name = StudyBlock;
+			packageProductDependencies = (
+			);
+			productName = StudyBlock;
+			productReference = 01A2BDF1E11F73F6C14BA1DC /* StudyBlock.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AE12A36F7E8BD6EF574EC947 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					08DC1D16B482B2D040370CB5 = {
+						ProvisioningStyle = Manual;
+					};
+					88AACEB4CC4AE1B5B9453DA8 = {
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 1A062D72723AD77932D96674 /* Build configuration list for PBXProject "StudyBlock" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = D8123258A70F2D44CE8ECA51;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5251F31EEB290055FF826049 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				88AACEB4CC4AE1B5B9453DA8 /* StudyBlock */,
+				08DC1D16B482B2D040370CB5 /* StudyBlockHelper */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		580448D0013AD6CCD5CD8B97 /* Embed helper daemon */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed helper daemon";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nAPP_CONTENTS=\"$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH\"\nmkdir -p \"$APP_CONTENTS/Library/LaunchDaemons\"\ncp \"$BUILT_PRODUCTS_DIR/com.avyay.studyblock.helper\" \"$APP_CONTENTS/MacOS/\"\ncp \"$SRCROOT/StudyBlock/LaunchDaemons/com.avyay.studyblock.helper.plist\" \"$APP_CONTENTS/Library/LaunchDaemons/\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		66B4809CBE8796D9A4F512F6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4BB39EA0E8C536C79379F58E /* AppBlockerController.swift in Sources */,
+				77D235AA45D343AFA6F2F3FC /* BlockerViewModel.swift in Sources */,
+				F2EF477B0354CEC94082F1CD /* DeckStore.swift in Sources */,
+				8F639E311CA37E5A961B3375 /* FlashcardsView.swift in Sources */,
+				B49E83CBE11195E2CCB4A25C /* FocusTimerController.swift in Sources */,
+				1194FE5650F254139756D87C /* FocusView.swift in Sources */,
+				9B9D7499C9DCAD9E435DF363 /* HelperClient.swift in Sources */,
+				DF1F557FA82EE6404AD7BC6B /* HelperProtocol.swift in Sources */,
+				A9DBBDC436F8EC2A0AB1D1E4 /* JSONStore.swift in Sources */,
+				72AB29B346C8349E25C453F2 /* MainView.swift in Sources */,
+				BB1D61D91744D1D24DF9FA8C /* NotesStore.swift in Sources */,
+				91959D161D544D4ADD64F167 /* NotesView.swift in Sources */,
+				25B34A66A6EB6E848DB6FEC0 /* QuickAddParser.swift in Sources */,
+				AE780669FA6B2DC0266F9CDA /* ReviewView.swift in Sources */,
+				35BB5609F9BFCEDE03FD2A1E /* SRS.swift in Sources */,
+				EB6D8D8F2DDFE3DA0ABFB991 /* StatsStore.swift in Sources */,
+				06AD7F1939F133BD782DC6A3 /* StatsView.swift in Sources */,
+				E577920A0D44F148A681D5FD /* StudyBlockApp.swift in Sources */,
+				7D7B549B0B24A3C6BEC58ED2 /* TaskModels.swift in Sources */,
+				F29FA33661E4A9045912F4DB /* TaskStore.swift in Sources */,
+				5DC02319A2A8A37F47441DC9 /* TasksView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C8D56F8225D74F7FAFD8682E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9601A4B2A0F3AA88B2ADD55C /* HelperProtocol.swift in Sources */,
+				22F7914D7B176C1B2713B445 /* HelperService.swift in Sources */,
+				FB8227F863F0B70D8357ABAD /* HostsFileManager.swift in Sources */,
+				2A49BC31BBBE283C4C6D2066 /* LockManager.swift in Sources */,
+				345A49C31AF209C6DB723AD2 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		971E083491E95A32B54F1C12 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 08DC1D16B482B2D040370CB5 /* StudyBlockHelper */;
+			targetProxy = FAA4DF04E79CD2B9E44A69F3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1113FF6A2B2044A3535C10CD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = StudyBlock/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.avyay.StudyBlock;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		1812F6AABF71C0119FF2F54F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.avyay.studyblock.helper;
+				PRODUCT_NAME = com.avyay.studyblock.helper;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		20E546E2D02E1F6B2A46EF57 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.avyay.studyblock.helper;
+				PRODUCT_NAME = com.avyay.studyblock.helper;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		691C201A5D882936359AFC5B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		C1885A7155F7189B34D5DA4D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		E3C185B5E4102F043F96888F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = StudyBlock/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.avyay.StudyBlock;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A062D72723AD77932D96674 /* Build configuration list for PBXProject "StudyBlock" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C1885A7155F7189B34D5DA4D /* Debug */,
+				691C201A5D882936359AFC5B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6537C7F677880D6B9CDABBF2 /* Build configuration list for PBXNativeTarget "StudyBlockHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				20E546E2D02E1F6B2A46EF57 /* Debug */,
+				1812F6AABF71C0119FF2F54F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B49ADB8223052A7F225C5104 /* Build configuration list for PBXNativeTarget "StudyBlock" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E3C185B5E4102F043F96888F /* Debug */,
+				1113FF6A2B2044A3535C10CD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = AE12A36F7E8BD6EF574EC947 /* Project object */;
+}

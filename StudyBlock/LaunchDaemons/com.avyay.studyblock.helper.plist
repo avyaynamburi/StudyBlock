@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.avyay.studyblock.helper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/com.avyay.studyblock.helper</string>
+	<key>MachServices</key>
+	<dict>
+		<key>com.avyay.studyblock.helper</key>
+		<true/>
+	</dict>
+	<!-- Start at boot so locked-session enforcement doesn't wait for the
+	     first XPC connection. -->
+	<key>RunAtLoad</key>
+	<true/>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.avyay.StudyBlock</string>
+	</array>
+</dict>
+</plist>

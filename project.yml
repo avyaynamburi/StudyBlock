@@ -1,0 +1,74 @@
+name: StudyBlock
+options:
+  bundleIdPrefix: com.avyay
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    # Ad-hoc signing: free, sufficient for running on this Mac.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_HARDENED_RUNTIME: NO
+
+targets:
+  StudyBlockHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: StudyBlockHelper
+      - path: Shared
+    settings:
+      base:
+        # The daemon executable is conventionally named after its launchd label.
+        PRODUCT_NAME: com.avyay.studyblock.helper
+        PRODUCT_BUNDLE_IDENTIFIER: com.avyay.studyblock.helper
+        SKIP_INSTALL: YES
+
+  StudyBlock:
+    type: application
+    platform: macOS
+    sources:
+      - path: StudyBlock
+        excludes:
+          - LaunchDaemons/*
+      - path: Shared
+    dependencies:
+      - target: StudyBlockHelper
+        embed: false
+    info:
+      path: StudyBlock/Info.plist
+      properties:
+        CFBundleDisplayName: StudyBlock
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        LSApplicationCategoryType: public.app-category.productivity
+        NSSupportsAutomaticTermination: false
+        NSSupportsSuddenTermination: false
+        NSAppleEventsUsageDescription: StudyBlock closes browser tabs on blocked sites while blocking is on.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.avyay.StudyBlock
+    postBuildScripts:
+      # The helper binary and its launchd plist must live inside the app bundle
+      # for SMAppService.daemon(plistName:) to find them.
+      - name: Embed helper daemon
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          APP_CONTENTS="$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH"
+          mkdir -p "$APP_CONTENTS/Library/LaunchDaemons"
+          cp "$BUILT_PRODUCTS_DIR/com.avyay.studyblock.helper" "$APP_CONTENTS/MacOS/"
+          cp "$SRCROOT/StudyBlock/LaunchDaemons/com.avyay.studyblock.helper.plist" "$APP_CONTENTS/Library/LaunchDaemons/"
+
+schemes:
+  StudyBlock:
+    build:
+      targets:
+        StudyBlock: all
+    run:
+      config: Debug
+    archive:
+      config: Release
