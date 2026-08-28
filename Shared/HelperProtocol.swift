@@ -8,7 +8,7 @@ enum StudyBlockShared {
 
     /// Bumped whenever the helper's behavior changes, so the app can detect a
     /// stale installed helper and re-register it.
-    static let helperVersion = "1.2.0"
+    static let helperVersion = "1.3.0"
 
     /// Hard cap on locked sessions, so a bug or typo can't lock the Mac's
     /// network for days.
@@ -31,6 +31,10 @@ protocol HelperProtocol {
     func getStatus(reply: @escaping (_ isBlocking: Bool, _ version: String) -> Void)
     func startLockedSession(_ domains: [String], endDate: Date, reply: @escaping (String?) -> Void)
     func getLockEndDate(reply: @escaping (Date?) -> Void)
+    /// Ends an active locked session immediately, before its deadline. The
+    /// helper trusts the app to have already gated this behind real friction
+    /// (the typed-challenge override) — it isn't itself a security check.
+    func endLockedSessionEarly(reply: @escaping (String?) -> Void)
 }
 
 /// Domain normalization/validation, used by the app for input feedback and

@@ -16,6 +16,9 @@ final class FocusTimerController: ObservableObject {
     @Published private(set) var isLockedSession = false
     @Published private(set) var currentTaskTitle: String?
     @Published private(set) var currentTaskCourse: String?
+    /// Set when a locked session's safety valve trips (see `pollHelperHealth`).
+    /// Stays set — surfaced as a banner — until the user acknowledges it.
+    @Published var helperStuckWarning = false
 
     private let blocker: BlockerViewModel
     private let stats: StatsStore
@@ -23,6 +26,15 @@ final class FocusTimerController: ObservableObject {
     private var currentTaskID: UUID?
     private var blockingWasOnBefore = false
     private var ticker: Timer?
+    /// Last time the helper actually answered a health check during a locked
+    /// session; nil when not tracking (no locked session running).
+    private var lastHelperContact: Date?
+    private var lastHelperHealthCheckAttempt: Date?
+
+    /// How often to ping the helper during a locked session, and how long it
+    /// can stay silent before the safety valve below gives up on it.
+    private static let helperHealthCheckInterval: TimeInterval = 30
+    private static let helperStuckThreshold: TimeInterval = 600
 
     private enum Keys {
         static let end = "focusSessionEnd"
@@ -80,6 +92,18 @@ final class FocusTimerController: ObservableObject {
         finish(completed: false)
     }
 
+    /// Ends a *locked* session early. Only call this after the typed-challenge
+    /// override has already passed — it exists specifically so that check has
+    /// somewhere real to lead. Tells the helper to drop its enforcement first;
+    /// only updates local state (and stats) if that actually succeeds, so a
+    /// failed/unreachable helper can't leave the app thinking it's unlocked
+    /// while the hosts file is still enforced underneath it.
+    func forceUnlock() async {
+        guard isLockedSession else { return }
+        guard await blocker.endLockedSessionEarly() else { return }
+        finish(completed: false)
+    }
+
     // MARK: - Internals
 
     private func startSession(minutes: Int, task: TodoItem?, locked: Bool) async {
@@ -94,6 +118,7 @@ final class FocusTimerController: ObservableObject {
             blockingWasOnBefore = false // lock expiry always unblocks
             guard await blocker.startLockedBlocking(until: end) else { return }
             isLockedSession = true
+            beginHelperHealthTracking()
         } else {
             isLockedSession = false
             blockingWasOnBefore = blocker.isBlocking
@@ -138,6 +163,7 @@ final class FocusTimerController: ObservableObject {
             // Session elapsed while the app was closed.
             finish(completed: true, notify: false)
         } else {
+            if isLockedSession { beginHelperHealthTracking() }
             startTicker()
         }
     }
@@ -153,7 +179,16 @@ final class FocusTimerController: ObservableObject {
         UserDefaults.standard.set(end, forKey: Keys.end)
         UserDefaults.standard.set(startDate, forKey: Keys.start)
         UserDefaults.standard.set(true, forKey: Keys.locked)
+        beginHelperHealthTracking()
         startTicker()
+    }
+
+    /// Starts (or restarts) the "is the helper still alive" tracking used by
+    /// the locked-session safety valve — a fresh clock each time a locked
+    /// session begins or is picked back up.
+    private func beginHelperHealthTracking() {
+        lastHelperContact = Date()
+        lastHelperHealthCheckAttempt = nil
     }
 
     private func startTicker() {
@@ -170,7 +205,40 @@ final class FocusTimerController: ObservableObject {
         remaining = endDate.timeIntervalSinceNow
         if remaining <= 0 {
             finish(completed: true)
+            return
         }
+        if isLockedSession { checkHelperHealthIfDue() }
+    }
+
+    /// Safety valve for a locked session whose helper has gone silent (crash,
+    /// signing/approval break, etc.): pings it every 30s, and if it hasn't
+    /// answered at all in 10 minutes, gives up waiting and clears the local
+    /// session so the app isn't stuck forever — while being upfront that the
+    /// underlying hosts-file block may still be in effect until the helper is
+    /// back (see the "Update Helper" banner).
+    private func checkHelperHealthIfDue() {
+        let now = Date()
+        if let lastAttempt = lastHelperHealthCheckAttempt,
+           now.timeIntervalSince(lastAttempt) < Self.helperHealthCheckInterval { return }
+        lastHelperHealthCheckAttempt = now
+        Task { await pollHelperHealth() }
+    }
+
+    private func pollHelperHealth() async {
+        guard isLockedSession else { return }
+        if await blocker.helperLockEndDate() != nil {
+            lastHelperContact = Date()
+            return
+        }
+        guard let lastContact = lastHelperContact,
+              Date().timeIntervalSince(lastContact) >= Self.helperStuckThreshold else { return }
+        helperStuckWarning = true
+        finish(completed: false)
+    }
+
+    /// Dismisses the safety-valve banner shown after `pollHelperHealth` trips.
+    func acknowledgeHelperStuckWarning() {
+        helperStuckWarning = false
     }
 
     private func finish(completed: Bool, notify: Bool = true) {

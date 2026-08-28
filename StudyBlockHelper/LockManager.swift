@@ -75,6 +75,17 @@ final class LockManager {
         queue.sync { activeLock()?.endDate }
     }
 
+    /// Ends the active lock right now, regardless of remaining time. The app
+    /// only calls this after its own typed-challenge friction gate passes —
+    /// the helper itself doesn't gate who's allowed to ask.
+    func endEarly() {
+        queue.sync {
+            guard activeLock() != nil else { return }
+            endLock()
+            logger.info("Locked session ended early")
+        }
+    }
+
     /// Called once at helper launch: resume enforcement of a live lock, or
     /// clean up after one that expired while the helper was down.
     func resumeAfterLaunch() {

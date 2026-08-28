@@ -70,6 +70,12 @@ final class HelperClient {
         }
     }
 
+    func endLockedSessionEarly() async throws {
+        try await call { proxy, finish in
+            proxy.endLockedSessionEarly { finish($0) }
+        }
+    }
+
     /// Version string the installed helper reports, nil if unreachable.
     func installedVersion() async -> String? {
         await query { proxy, finish in

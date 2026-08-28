@@ -10,6 +10,7 @@ struct FocusView: View {
     @State private var customMinutes = 30
     @State private var newDomain = ""
     @State private var showingAppPicker = false
+    @State private var showingUnlockChallenge = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,6 +36,10 @@ struct FocusView: View {
                                      ? "The background helper isn't responding — an update changed the app's identity, so it needs one re-approval. Click below, then switch StudyBlock on in System Settings."
                                      : "StudyBlock was updated, but the background helper is still running the old version. Restart it to apply the fix.",
                                      buttonTitle: "Update Helper") { model.updateHelper() }
+                    }
+
+                    if timer.helperStuckWarning {
+                        helperStuckBanner
                     }
 
                     if let error = model.lastError {
@@ -111,16 +116,26 @@ struct FocusView: View {
                 .foregroundStyle(.secondary)
 
             if timer.isLockedSession {
-                Label("Locked until \(timer.lockedUntilLabel) — no giving up", systemImage: "lock.fill")
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(Theme.amber)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(Theme.amberSoft, in: Capsule())
+                VStack(spacing: 8) {
+                    Label("Locked until \(timer.lockedUntilLabel) — no giving up", systemImage: "lock.fill")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(Theme.amber)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Theme.amberSoft, in: Capsule())
+
+                    Button("Unlock early…") { showingUnlockChallenge = true }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             } else {
                 Button("Give Up") { timer.giveUp() }
                     .buttonStyle(SoftPillButtonStyle(tint: Theme.danger))
             }
+        }
+        .sheet(isPresented: $showingUnlockChallenge) {
+            UnlockChallengeSheet()
         }
     }
 
@@ -208,6 +223,30 @@ struct FocusView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Button(buttonTitle, action: action)
                     .buttonStyle(SoftPillButtonStyle(tint: tint))
+            }
+            Spacer(minLength: 0)
+        }
+        .card(padding: 16)
+    }
+
+    /// Shown after the locked-session safety valve trips (helper silent for
+    /// 10+ minutes): the app gave up waiting and cleared its own lock state,
+    /// but can't guarantee the hosts-file block actually lifted — only the
+    /// helper can do that, so this points at reviving it.
+    private var helperStuckBanner: some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                Circle().fill(Theme.dangerSoft).frame(width: 38, height: 38)
+                Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.danger)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("The blocking helper stopped responding for over 10 minutes, so this locked session's local timer was cleared automatically. Websites may still be blocked until the helper is back — use \u{201C}Update Helper\u{201D} above if it reappears, or check Website Shield below.")
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Dismiss") { timer.acknowledgeHelperStuckWarning() }
+                    .buttonStyle(SoftPillButtonStyle(tint: Theme.danger))
             }
             Spacer(minLength: 0)
         }

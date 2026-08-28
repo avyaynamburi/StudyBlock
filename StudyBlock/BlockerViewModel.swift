@@ -196,6 +196,14 @@ final class BlockerViewModel: ObservableObject {
         return await helper.lockEndDate()
     }
 
+    /// Ends a locked session before its deadline. Only meant to be called
+    /// after the app's own friction gate (the typed-challenge override) has
+    /// already passed — returns false (with `lastError` set) on failure.
+    func endLockedSessionEarly() async -> Bool {
+        await run { try await self.helper.endLockedSessionEarly() }
+        return lastError == nil
+    }
+
     private func run(_ operation: () async throws -> Void) async {
         lastError = nil
         isBusy = true

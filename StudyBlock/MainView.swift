@@ -95,9 +95,12 @@ struct MainView: View {
     private func badge(for item: AppSection) -> String? {
         switch item {
         case .tasks:
-            let due = tasks.groupedOpenTasks(course: nil)
-                .filter { $0.group == .overdue || $0.group == .today }
-                .reduce(0) { $0 + $1.tasks.count }
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: .now)
+            let due = tasks.items.filter { task in
+                guard !task.isCompleted, let dueDate = task.dueDate else { return false }
+                return calendar.startOfDay(for: dueDate) <= today
+            }.count
             return due > 0 ? "\(due)" : nil
         case .flashcards:
             let due = decks.decks.reduce(0) { $0 + $1.dueCount() }

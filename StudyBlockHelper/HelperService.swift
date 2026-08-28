@@ -26,6 +26,11 @@ final class HelperService: NSObject, HelperProtocol {
         reply(lock.lockEndDate())
     }
 
+    func endLockedSessionEarly(reply: @escaping (String?) -> Void) {
+        lock.endEarly()
+        reply(nil)
+    }
+
     private func errorMessage(_ operation: () throws -> Void) -> String? {
         do {
             try operation()

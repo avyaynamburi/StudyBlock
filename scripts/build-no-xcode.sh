@@ -15,7 +15,7 @@ BUILD=build/manual
 APP="$BUILD/StudyBlock.app"
 BUNDLE_ID="com.avyay.StudyBlock"
 HELPER_NAME="com.avyay.studyblock.helper"
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 SIGN_IDENTITY="StudyBlock Self-Signed"
 SIGN_KEYCHAIN="$HOME/Library/Keychains/studyblock-signing.keychain-db"

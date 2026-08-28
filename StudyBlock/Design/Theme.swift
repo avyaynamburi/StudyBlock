@@ -32,21 +32,27 @@ enum Theme {
         LinearGradient(colors: [accent, violet], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
-    /// Fixed categorical palette for course chips — hue follows the course
-    /// name (stable hash), never its position in a list.
-    static let courseColors: [Color] = [
-        Color(light: 0x2A78D6, dark: 0x5B9EEA), // blue
-        Color(light: 0x0E8A66, dark: 0x2FB98F), // teal
-        Color(light: 0xB25E09, dark: 0xE59A3C), // orange
-        Color(light: 0x7C4DC4, dark: 0xA78BFA), // violet
-        Color(light: 0xC03D74, dark: 0xE0709F), // magenta
-        Color(light: 0x50691E, dark: 0x9CB55A), // olive
-    ]
+    /// Evenly spaced hues (0..<360) offered by the category color picker.
+    /// Saturation/brightness are fixed by `categoryPastel`/`categoryInk`, so
+    /// every swatch reads as a soft pastel — never neon, never dark.
+    static let categoryHueSteps: [Double] = stride(from: 0, to: 360, by: 30).map { $0 }
 
-    static func courseColor(_ name: String) -> Color {
-        var hash: UInt64 = 5381
-        for byte in name.lowercased().utf8 { hash = hash &* 33 &+ UInt64(byte) }
-        return courseColors[Int(hash % UInt64(courseColors.count))]
+    /// The swatch shown in the category color picker itself — pale and
+    /// gentle, so nothing selectable there can read as "too bright."
+    static func categoryPastel(hue: Double) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return NSColor(hue: hue / 360, saturation: isDark ? 0.30 : 0.30, brightness: isDark ? 0.34 : 0.95, alpha: 1)
+        })
+    }
+
+    /// The same hue, deepened for use as text/icon color (on top of its own
+    /// `.opacity(0.14)` tint in `TagChip`) so category labels stay legible.
+    static func categoryInk(hue: Double) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return NSColor(hue: hue / 360, saturation: isDark ? 0.45 : 0.62, brightness: isDark ? 0.80 : 0.52, alpha: 1)
+        })
     }
 
     // Typography
