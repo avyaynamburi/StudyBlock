@@ -11,7 +11,18 @@ enum HelperState: Equatable {
 
 @MainActor
 final class BlockerViewModel: ObservableObject {
-    @Published var domains: [String] = []
+    /// The named lists the user can switch on and off independently.
+    @Published var groups: [BlockGroup] = [] {
+        didSet { JSONStore.save(groups, to: "blockGroups.json") }
+    }
+    /// Lists switched on by an open schedule window, on top of whatever the
+    /// user has enabled by hand. Kept separate from `BlockGroup.isEnabled` so
+    /// a schedule never has to remember and restore the user's own switches.
+    @Published private(set) var scheduledGroupIDs: Set<UUID> = []
+    /// True while a focus session owns the block. Background automation checks
+    /// this before switching blocking off, so a schedule closing mid-session
+    /// can't unblock the sites the session is holding shut.
+    @Published var isSessionManaged = false
     @Published var isBlocking = false
     @Published var helperState: HelperState = .needsSetup
     @Published var lastError: String?
@@ -32,8 +43,36 @@ final class BlockerViewModel: ObservableObject {
     private var versionChecked = false
     private var versionCheckFailures = 0
 
+    /// Everything actually enforced: the union of the enabled groups, in group
+    /// order and deduplicated, so a site that appears in two lists is written
+    /// to /etc/hosts once and stays blocked until both are switched off.
+    ///
+    /// Computed rather than stored so it can never disagree with the groups —
+    /// every caller that used to read a flat list still reads this one.
+    var domains: [String] {
+        var seen = Set<String>()
+        return groups
+            .filter { $0.isEnabled || scheduledGroupIDs.contains($0.id) }
+            .flatMap(\.domains)
+            .filter { seen.insert($0).inserted }
+    }
+
+    /// True when this list is only on because a schedule says so — shown in
+    /// the UI so a list that looks switched off but is being enforced isn't a
+    /// mystery.
+    func isOnBySchedule(_ group: BlockGroup) -> Bool {
+        !group.isEnabled && scheduledGroupIDs.contains(group.id)
+    }
+
+    /// Called by the scheduler as windows open and close.
+    func setScheduledGroups(_ ids: Set<UUID>) {
+        guard ids != scheduledGroupIDs else { return }
+        scheduledGroupIDs = ids
+        reapplyIfBlocking()
+    }
+
     init() {
-        loadBlocklist()
+        loadGroups()
         refresh()
         // Keep status truthful even if hosts or Login Items change outside the
         // app (e.g. user approves the helper in System Settings).
@@ -216,21 +255,50 @@ final class BlockerViewModel: ObservableObject {
         refresh()
     }
 
-    func addDomain(_ raw: String) {
+    // MARK: - Groups
+
+    func addGroup(named rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        groups.append(BlockGroup(name: name))
+    }
+
+    func renameGroup(_ id: UUID, to rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].name = name
+    }
+
+    func deleteGroup(_ id: UUID) {
+        groups.removeAll { $0.id == id }
+        reapplyIfBlocking()
+    }
+
+    func setGroup(_ id: UUID, enabled: Bool) {
+        guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].isEnabled = enabled
+        reapplyIfBlocking()
+    }
+
+    // MARK: - Domains
+
+    func addDomain(_ raw: String, to groupID: UUID) {
         lastError = nil
         guard let domain = DomainValidator.normalize(raw) else {
             lastError = "\"\(raw.trimmingCharacters(in: .whitespacesAndNewlines))\" doesn't look like a website domain"
             return
         }
-        guard !domains.contains(domain) else { return }
-        domains.append(domain)
-        saveBlocklist()
+        guard let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        // Already in *this* list is a no-op; already in another one is fine —
+        // lists are allowed to overlap.
+        guard !groups[index].domains.contains(domain) else { return }
+        groups[index].domains.append(domain)
         reapplyIfBlocking()
     }
 
-    func removeDomains(at offsets: IndexSet) {
-        domains.remove(atOffsets: offsets)
-        saveBlocklist()
+    func removeDomain(_ domain: String, from groupID: UUID) {
+        guard let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        groups[index].domains.removeAll { $0 == domain }
         reapplyIfBlocking()
     }
 
@@ -254,11 +322,24 @@ final class BlockerViewModel: ObservableObject {
 
     // MARK: - Persistence
 
-    private func loadBlocklist() {
-        domains = JSONStore.load([String].self, from: "blocklist.json") ?? []
-    }
+    private func loadGroups() {
+        if let stored = JSONStore.load([BlockGroup].self, from: "blockGroups.json") {
+            groups = stored
+            return
+        }
 
-    private func saveBlocklist() {
-        JSONStore.save(domains, to: "blocklist.json")
+        // First launch of a build that has groups. Seed the built-in
+        // Distractions list, then carry over anything from the old flat
+        // blocklist it doesn't already cover, so no site the user added by
+        // hand is lost. An empty `blockGroups.json` is a real state — the user
+        // deleted every list — so this only ever runs when the file is absent.
+        var seeded = [BlockGroup(name: "Distractions", domains: BlockGroup.distractionsPreset)]
+        let preset = Set(BlockGroup.distractionsPreset)
+        let carriedOver = (JSONStore.load([String].self, from: "blocklist.json") ?? [])
+            .filter { !preset.contains($0) }
+        if !carriedOver.isEmpty {
+            seeded.append(BlockGroup(name: "My Sites", domains: carriedOver))
+        }
+        groups = seeded
     }
 }

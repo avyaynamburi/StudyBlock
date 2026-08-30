@@ -107,6 +107,9 @@ final class FocusTimerController: ObservableObject {
     // MARK: - Internals
 
     private func startSession(minutes: Int, task: TodoItem?, locked: Bool) async {
+        // Tells background automation (the block schedule) to keep its hands
+        // off the block until this session ends.
+        blocker.isSessionManaged = true
         let now = Date()
         let end = now.addingTimeInterval(TimeInterval(minutes * 60))
         let canBlock = !blocker.domains.isEmpty && blocker.helperState == .ready
@@ -242,6 +245,7 @@ final class FocusTimerController: ObservableObject {
     }
 
     private func finish(completed: Bool, notify: Bool = true) {
+        blocker.isSessionManaged = false
         guard let end = endDate else { return }
         ticker?.invalidate()
         ticker = nil

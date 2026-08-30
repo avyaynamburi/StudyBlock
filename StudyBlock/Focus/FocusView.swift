@@ -8,7 +8,13 @@ struct FocusView: View {
     @EnvironmentObject private var tabCloser: BrowserTabCloser
     @AppStorage("lockSessions") private var lockSessions = false
     @State private var customMinutes = 30
-    @State private var newDomain = ""
+    /// Per-list text for the "add a website" field, keyed by group.
+    @State private var draftDomain: [UUID: String] = [:]
+    @State private var expandedGroups: Set<UUID> = []
+    @State private var renamingGroup: BlockGroup?
+    @State private var groupNameDraft = ""
+    @State private var showingNewGroup = false
+    @State private var deletingGroup: BlockGroup?
     @State private var showingAppPicker = false
     @State private var showingUnlockChallenge = false
 
@@ -299,46 +305,178 @@ struct FocusView: View {
 
             Divider().overlay(Theme.stroke)
 
-            HStack(spacing: 8) {
-                Image(systemName: "globe")
-                    .foregroundStyle(.secondary)
-                TextField("Add a website — e.g. youtube.com", text: $newDomain)
-                    .textFieldStyle(.plain)
-                    .onSubmit(addDomain)
-                Button("Add", action: addDomain)
-                    .buttonStyle(SoftPillButtonStyle(tint: Theme.accent))
-                    .disabled(newDomain.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
-
-            if model.domains.isEmpty {
-                Text("No websites yet — add the ones that distract you.")
+            if model.groups.isEmpty {
+                Text("No lists yet — make one and add the sites that distract you.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 12)
             } else {
-                FlowLayout(spacing: 8) {
-                    ForEach(model.domains, id: \.self) { domain in
-                        DomainChip(domain: domain) {
-                            if let index = model.domains.firstIndex(of: domain) {
-                                model.removeDomains(at: IndexSet(integer: index))
+                VStack(spacing: 10) {
+                    ForEach(model.groups) { group in
+                        groupRow(group)
+                    }
+                }
+            }
+
+            Button {
+                groupNameDraft = ""
+                showingNewGroup = true
+            } label: {
+                Label("New List", systemImage: "plus")
+            }
+            .buttonStyle(SoftPillButtonStyle(tint: Theme.accent))
+        }
+        .card()
+        .alert("New block list", isPresented: $showingNewGroup) {
+            TextField("Name — e.g. Social, Games, News", text: $groupNameDraft)
+            Button("Create") { model.addGroup(named: groupNameDraft) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A list you can switch on and off on its own. Sites in it are blocked whenever it\u{2019}s on and blocking is running.")
+        }
+        .alert("Rename list", isPresented: Binding(
+            get: { renamingGroup != nil },
+            set: { if !$0 { renamingGroup = nil } }
+        )) {
+            TextField("Name", text: $groupNameDraft)
+            Button("Rename") {
+                if let group = renamingGroup { model.renameGroup(group.id, to: groupNameDraft) }
+                renamingGroup = nil
+            }
+            Button("Cancel", role: .cancel) { renamingGroup = nil }
+        }
+        .confirmationDialog("Delete this list?",
+                            isPresented: Binding(get: { deletingGroup != nil },
+                                                 set: { if !$0 { deletingGroup = nil } })) {
+            Button("Delete \u{201C}\(deletingGroup?.name ?? "")\u{201D}", role: .destructive) {
+                if let group = deletingGroup { model.deleteGroup(group.id) }
+                deletingGroup = nil
+            }
+            Button("Cancel", role: .cancel) { deletingGroup = nil }
+        } message: {
+            Text("\(deletingGroup?.domains.count ?? 0) site\(deletingGroup?.domains.count == 1 ? "" : "s") "
+                 + "would stop being blocked. Switching the list off instead keeps it for later.")
+        }
+    }
+
+    /// One block list: a header that toggles the whole list on or off, and an
+    /// expandable body holding its sites.
+    @ViewBuilder
+    private func groupRow(_ group: BlockGroup) -> some View {
+        let isExpanded = expandedGroups.contains(group.id)
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        if isExpanded { expandedGroups.remove(group.id) }
+                        else { expandedGroups.insert(group.id) }
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        Text(group.name)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(group.isEnabled ? .primary : .secondary)
+                        Text("\(group.domains.count)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 0)
+
+                Menu {
+                    Button("Rename\u{2026}") {
+                        groupNameDraft = group.name
+                        renamingGroup = group
+                    }
+                    Divider()
+                    Button("Delete List", role: .destructive) { deletingGroup = group }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+
+                Toggle("", isOn: Binding(
+                    get: { group.isEnabled },
+                    set: { model.setGroup(group.id, enabled: $0) }
+                ))
+                .toggleStyle(GlowToggleStyle())
+                .labelsHidden()
+                .help(group.isEnabled
+                      ? "On — these sites are part of the block"
+                      : "Off — these sites are left out")
+            }
+
+            if isExpanded {
+                HStack(spacing: 8) {
+                    Image(systemName: "globe")
+                        .foregroundStyle(.secondary)
+                    TextField("Add a website — e.g. youtube.com", text: Binding(
+                        get: { draftDomain[group.id] ?? "" },
+                        set: { draftDomain[group.id] = $0 }
+                    ))
+                    .textFieldStyle(.plain)
+                    .onSubmit { addDomain(to: group) }
+                    Button("Add") { addDomain(to: group) }
+                        .buttonStyle(SoftPillButtonStyle(tint: Theme.accent))
+                        .disabled((draftDomain[group.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
+
+                if group.domains.isEmpty {
+                    Text("No websites in this list yet.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
+                } else {
+                    FlowLayout(spacing: 8) {
+                        ForEach(group.domains, id: \.self) { domain in
+                            DomainChip(domain: domain) {
+                                model.removeDomain(domain, from: group.id)
                             }
                         }
                     }
                 }
             }
         }
-        .card()
+        .padding(12)
+        .background(Theme.surfaceLow.opacity(group.isEnabled ? 1 : 0.5),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(Theme.stroke, lineWidth: 1))
     }
 
     private var shieldSubtitle: String {
         if timer.isRunning { return "Managed by the focus session" }
-        if model.domains.isEmpty && !model.isBlocking { return "Add at least one website below to start" }
-        return model.isBlocking ? "On — new connections to these sites are refused" : "Off — sites load normally"
+        if model.domains.isEmpty {
+            if model.isBlocking { return "On — but every list is off, so nothing is blocked" }
+            return model.groups.contains { !$0.domains.isEmpty }
+                ? "Switch on a list below to start"
+                : "Add a website to a list below to start"
+        }
+        let count = model.domains.count
+        let sites = "\(count) site\(count == 1 ? "" : "s")"
+        let enabled = model.groups.filter { $0.isEnabled && !$0.domains.isEmpty }.count
+        let lists = enabled == 1 ? "1 list" : "\(enabled) lists"
+        return model.isBlocking
+            ? "On — \(sites) across \(lists), new connections refused"
+            : "Off — \(sites) across \(lists) ready to block"
     }
 
     // MARK: - Blocked apps
@@ -415,9 +553,9 @@ struct FocusView: View {
         }
     }
 
-    private func addDomain() {
-        model.addDomain(newDomain)
-        if model.lastError == nil { newDomain = "" }
+    private func addDomain(to group: BlockGroup) {
+        model.addDomain(draftDomain[group.id] ?? "", to: group.id)
+        if model.lastError == nil { draftDomain[group.id] = "" }
     }
 }
 

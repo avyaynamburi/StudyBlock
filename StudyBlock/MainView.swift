@@ -2,6 +2,7 @@ import SwiftUI
 
 enum AppSection: String, CaseIterable, Identifiable {
     case focus = "Focus"
+    case schedule = "Schedule"
     case tasks = "Tasks"
     case flashcards = "Flashcards"
     case notes = "Notes"
@@ -12,6 +13,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .focus: return "timer"
+        case .schedule: return "calendar"
         case .tasks: return "checklist"
         case .flashcards: return "rectangle.on.rectangle.angled"
         case .notes: return "note.text"
@@ -163,6 +165,7 @@ struct MainView: View {
             Group {
                 switch section {
                 case .focus: FocusView()
+                case .schedule: ScheduleView()
                 case .tasks: TasksView()
                 case .flashcards: FlashcardsView()
                 case .notes: NotesView()

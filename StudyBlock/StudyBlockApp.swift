@@ -7,6 +7,7 @@ struct StudyBlockApp: App {
     @StateObject private var stats: StatsStore
     @StateObject private var appBlocker: AppBlockerController
     @StateObject private var tabCloser: BrowserTabCloser
+    @StateObject private var scheduler: BlockScheduleController
     @StateObject private var tasks = TaskStore()
     @StateObject private var decks = DeckStore()
     @StateObject private var notes = NotesStore()
@@ -20,6 +21,7 @@ struct StudyBlockApp: App {
         _timer = StateObject(wrappedValue: FocusTimerController(blocker: blocker, stats: stats))
         _appBlocker = StateObject(wrappedValue: AppBlockerController(blocker: blocker))
         _tabCloser = StateObject(wrappedValue: BrowserTabCloser(blocker: blocker))
+        _scheduler = StateObject(wrappedValue: BlockScheduleController(blocker: blocker))
     }
 
     var body: some Scene {
@@ -30,6 +32,7 @@ struct StudyBlockApp: App {
                 .environmentObject(stats)
                 .environmentObject(appBlocker)
                 .environmentObject(tabCloser)
+                .environmentObject(scheduler)
                 .environmentObject(tasks)
                 .environmentObject(decks)
                 .environmentObject(notes)

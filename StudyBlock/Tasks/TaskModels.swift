@@ -27,6 +27,36 @@ enum RepeatRule: String, Codable, CaseIterable {
         }
     }
 
+    /// The unit letter used by the CSV `repeat` code — `2w` is "every two
+    /// weeks". Kept next to `label` so the two never drift apart.
+    var unitCode: String {
+        switch self {
+        case .none: return ""
+        case .daily: return "d"
+        case .weekly: return "w"
+        case .monthly: return "m"
+        }
+    }
+
+    /// "day"/"days" etc., for spelling an interval out in the UI.
+    func unitName(plural: Bool) -> String {
+        switch self {
+        case .none: return ""
+        case .daily: return plural ? "days" : "day"
+        case .weekly: return plural ? "weeks" : "week"
+        case .monthly: return plural ? "months" : "month"
+        }
+    }
+
+    /// "Every 2 weeks", "Every month" — the phrase the recurring sheet shows
+    /// beside its interval stepper.
+    func intervalLabel(_ interval: Int) -> String {
+        guard self != .none else { return label }
+        return interval <= 1
+            ? "Every \(unitName(plural: false))"
+            : "Every \(interval) \(unitName(plural: true))"
+    }
+
     /// How many occurrences a series with no end date materialises up front.
     /// A perpetual task can't be expanded forever, so the board carries a
     /// deep-but-finite runway that `TaskStore` tops back up each time one of
@@ -54,28 +84,21 @@ enum RepeatRule: String, Codable, CaseIterable {
         return nil
     }
 
-    private func nextSelectedWeekday(after date: Date, in weekdays: Set<Int>,
-                                     calendar: Calendar) -> Date? {
-        var candidate = date
-        for _ in 0..<7 {
-            guard let next = calendar.date(byAdding: .day, value: 1, to: candidate) else { return nil }
-            candidate = next
-            if weekdays.contains(calendar.component(.weekday, from: candidate)) { return candidate }
-        }
-        return nil
-    }
-
     /// The `index`-th due date of a series beginning at `start` (index 0 is
-    /// the first occurrence). Every date is derived from `start` rather than
-    /// from the previous one, which is what keeps a monthly series pinned to
-    /// the 31st instead of walking back to the 28th after a short month, and
-    /// keeps the time of day exactly as the user set it.
+    /// the first occurrence). `interval` is how many periods separate
+    /// occurrences, so `.weekly` with an interval of 2 is "every other week".
+    ///
+    /// Every date is derived from `start` rather than from the previous one,
+    /// which is what keeps a monthly series pinned to the 31st instead of
+    /// walking back to the 28th after a short month, and keeps the time of
+    /// day exactly as the user set it.
     ///
     /// `weekdays` (1 = Sunday … 7 = Saturday) narrows `.weekly` to specific
     /// days; empty means "the same weekday `start` falls on".
-    func occurrence(index: Int, from start: Date, weekdays: Set<Int> = [],
+    func occurrence(index: Int, from start: Date, weekdays: Set<Int> = [], interval: Int = 1,
                     calendar: Calendar = .current) -> Date? {
         guard index >= 0, self != .none else { return nil }
+        let step = max(1, interval)
         guard let first = firstOccurrence(onOrAfter: start, weekdays: weekdays, calendar: calendar) else {
             return nil
         }
@@ -85,42 +108,58 @@ enum RepeatRule: String, Codable, CaseIterable {
         case .none:
             return nil
         case .daily:
-            return calendar.date(byAdding: .day, value: index, to: first)
+            return calendar.date(byAdding: .day, value: step * index, to: first)
         case .monthly:
-            return calendar.date(byAdding: .month, value: index, to: first)
+            return calendar.date(byAdding: .month, value: step * index, to: first)
+        case .weekly where weekdays.isEmpty:
+            return calendar.date(byAdding: .day, value: 7 * step * index, to: first)
         case .weekly:
-            guard !weekdays.isEmpty else {
-                return calendar.date(byAdding: .day, value: 7 * index, to: first)
-            }
-            // A weekday selection repeats on an exact 7-day cycle with
-            // `weekdays.count` hits per cycle, so whole cycles are one jump
-            // and only the remainder has to be walked a day at a time.
-            let perWeek = weekdays.count
-            guard var candidate = calendar.date(byAdding: .day, value: 7 * (index / perWeek), to: first) else {
-                return nil
-            }
-            for _ in 0..<(index % perWeek) {
-                guard let next = nextSelectedWeekday(after: candidate, in: weekdays, calendar: calendar) else {
-                    return nil
-                }
-                candidate = next
-            }
-            return candidate
+            guard let offset = weeklyDayOffset(index: index, from: first, weekdays: weekdays,
+                                               interval: step, calendar: calendar) else { return nil }
+            return calendar.date(byAdding: .day, value: offset, to: first)
         }
+    }
+
+    /// Days from the first occurrence to the `index`-th, for a weekly rule
+    /// narrowed to specific weekdays.
+    ///
+    /// The series tiles the calendar in cycles of `interval` weeks, each
+    /// cycle hitting every selected weekday. The cycle holding `first` is the
+    /// exception: selected days earlier in that week have already gone by, so
+    /// it contributes only the days from `first` onward. Anchoring the cycles
+    /// to real calendar weeks — not to `first` — is what makes "every other
+    /// Mon/Wed/Fri, starting Wednesday" skip the following Monday instead of
+    /// treating it as part of the first cycle.
+    private func weeklyDayOffset(index: Int, from first: Date, weekdays: Set<Int>,
+                                 interval: Int, calendar: Calendar) -> Int? {
+        // Each selected weekday's position within its calendar week.
+        let weekStart = calendar.firstWeekday
+        let offsets = weekdays.map { ($0 - weekStart + 7) % 7 }.sorted()
+        guard !offsets.isEmpty else { return nil }
+        let perCycle = offsets.count
+        let firstOffset = (calendar.component(.weekday, from: first) - weekStart + 7) % 7
+
+        // What's left of the first cycle, starting at `first` itself.
+        let remainder = offsets.filter { $0 >= firstOffset }
+        if index < remainder.count { return remainder[index] - firstOffset }
+
+        let after = index - remainder.count
+        let cycle = after / perCycle + 1
+        return 7 * interval * cycle + offsets[after % perCycle] - firstOffset
     }
 
     /// Every due date in a series, in order. `endDate` stops it on that day
     /// (inclusive); `limit` caps how many are produced either way, which is
     /// what makes a perpetual series finite.
-    func occurrences(startingAt start: Date, weekdays: Set<Int> = [], endDate: Date? = nil,
-                     limit: Int = RepeatRule.perpetualCount,
+    func occurrences(startingAt start: Date, weekdays: Set<Int> = [], interval: Int = 1,
+                     endDate: Date? = nil, limit: Int = RepeatRule.perpetualCount,
                      calendar: Calendar = .current) -> [Date] {
         guard self != .none, limit > 0 else { return [] }
         let cutoff = endDate.map { calendar.startOfDay(for: $0) }
         var dates: [Date] = []
         for index in 0..<limit {
             guard let date = occurrence(index: index, from: start, weekdays: weekdays,
-                                        calendar: calendar) else { break }
+                                        interval: interval, calendar: calendar) else { break }
             if let cutoff, calendar.startOfDay(for: date) > cutoff { break }
             dates.append(date)
         }
@@ -154,12 +193,19 @@ enum TaskColumn: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Where a task lands by default: Upcoming if due within 7 days (overdue
-    /// counts as due), otherwise the backlog ("All Tasks"). Pure, so both the
-    /// store and CSV import place tasks by exactly the same rule.
+    /// Where a task lands by default: Upcoming if it's due within 7 days
+    /// (overdue counts as due) **or has no due date at all**, otherwise the
+    /// backlog ("All Tasks"). Pure, so both the store and CSV import place
+    /// tasks by exactly the same rule.
+    ///
+    /// An undated task is something to get to soon, not something scheduled
+    /// for later, so Upcoming is where it belongs. That leaves "All Tasks"
+    /// holding exactly two kinds of card: work genuinely dated more than a
+    /// week out, and anything deliberately parked there — which
+    /// `columnIsManual` keeps from being pulled back out.
     static func automatic(forDueDate dueDate: Date?, now: Date = Date(),
                           calendar: Calendar = .current) -> TaskColumn {
-        guard let dueDate else { return .backlog }
+        guard let dueDate else { return .upcoming }
         let day = calendar.startOfDay(for: dueDate)
         let today = calendar.startOfDay(for: now)
         guard let weekOut = calendar.date(byAdding: .day, value: 7, to: today) else { return .backlog }
@@ -177,6 +223,12 @@ struct TodoItem: Identifiable, Codable, Equatable {
     var repeatRule: RepeatRule = .none
     /// 1 = Sunday … 7 = Saturday. Only meaningful when `repeatRule == .weekly`.
     var repeatWeekdays: Set<Int> = []
+    /// Backing store for `repeatInterval`. Optional on purpose: `JSONStore`
+    /// turns any decode failure into an empty board, so a new *non*-optional
+    /// field would silently erase every task saved before this existed.
+    /// Optionals decode as nil when the key is absent, which is exactly the
+    /// "no interval recorded" case. Read and write it via `repeatInterval`.
+    var repeatEvery: Int? = nil
     var isCompleted = false
     var completedAt: Date?
     var createdAt = Date()
@@ -197,6 +249,14 @@ struct TodoItem: Identifiable, Codable, Equatable {
     /// (so the default order is chronological) and only changes when the
     /// user drags the task to a new position, or hits "Sort by Date".
     var manualOrder: Double = 0
+
+    /// Periods between occurrences: 2 alongside `.weekly` is "every other
+    /// week", 12 alongside `.monthly` is "every year". Always at least 1, and
+    /// 1 is stored as nil so the common case adds nothing to the JSON.
+    var repeatInterval: Int {
+        get { max(1, repeatEvery ?? 1) }
+        set { repeatEvery = newValue <= 1 ? nil : newValue }
+    }
 
     var isOverdue: Bool {
         guard !isCompleted, let due = dueDate else { return false }
@@ -221,6 +281,7 @@ struct TodoItem: Identifiable, Codable, Equatable {
         let dates = repeatRule.occurrences(
             startingAt: start,
             weekdays: repeatWeekdays,
+            interval: repeatInterval,
             endDate: seriesEndDate,
             limit: RepeatRule.materializedCount(hasEndDate: seriesEndDate != nil),
             calendar: calendar)

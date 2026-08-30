@@ -59,6 +59,7 @@ final class TaskStore: ObservableObject {
             for index in items.indices where items[index].seriesID == task.id && items[index].isCompleted {
                 items[index].repeatRule = task.repeatRule
                 items[index].repeatWeekdays = task.repeatWeekdays
+                items[index].repeatInterval = task.repeatInterval
                 items[index].seriesEndDate = task.seriesEndDate
             }
         }
@@ -86,6 +87,13 @@ final class TaskStore: ObservableObject {
 
     func exportCSV() -> String {
         TaskCSV.encode(items: items, hues: courseHues)
+    }
+
+    /// The board's categories paired with the CSV color word each one uses,
+    /// for the AI prompt — so a generated file joins the categories already
+    /// in use instead of inventing near-duplicates of them.
+    var csvCategories: [(name: String, color: String)] {
+        courses.map { (name: $0, color: TaskCSV.nearestColorName(for: hue(for: $0))) }
     }
 
     struct ImportSummary {
@@ -151,7 +159,7 @@ final class TaskStore: ObservableObject {
     /// which `topUpSeries` extends as they're completed.
     @discardableResult
     func addRecurring(title: String, course: String?, dueDate: Date, priority: TaskPriority,
-                      repeatRule: RepeatRule, repeatWeekdays: Set<Int>,
+                      repeatRule: RepeatRule, repeatWeekdays: Set<Int>, repeatInterval: Int = 1,
                       seriesEndDate: Date? = nil, notes: String = "") -> Int {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return 0 }
@@ -159,6 +167,7 @@ final class TaskStore: ObservableObject {
         var template = TodoItem(title: trimmed, notes: notes, course: course, dueDate: dueDate,
                                 priority: priority, repeatRule: repeatRule,
                                 repeatWeekdays: repeatWeekdays)
+        template.repeatInterval = repeatInterval
         template.seriesID = UUID()
         template.seriesEndDate = seriesEndDate
 
@@ -199,6 +208,16 @@ final class TaskStore: ObservableObject {
         if !updated.isCompleted, !updated.columnIsManual {
             updated.column = defaultColumn(for: updated.dueDate)
         }
+        // The board is one date-ordered list now, so changing a due date has
+        // to move the card. A task the user dragged into a particular spot
+        // keeps it: dragging is what makes `manualOrder` stop matching the due
+        // date, and that mismatch is the only record we have that the
+        // placement was deliberate.
+        let existing = items[index]
+        if updated.dueDate != existing.dueDate,
+           existing.manualOrder == TodoItem.dateOrderValue(for: existing.dueDate) {
+            updated.manualOrder = TodoItem.dateOrderValue(for: updated.dueDate)
+        }
         items[index] = updated
         return 1
     }
@@ -210,7 +229,7 @@ final class TaskStore: ObservableObject {
     /// rewriting the past.
     func updateSeries(seriesID: UUID, title: String, course: String?, dueDate: Date,
                       priority: TaskPriority, repeatRule: RepeatRule, repeatWeekdays: Set<Int>,
-                      seriesEndDate: Date?, notes: String? = nil) {
+                      repeatInterval: Int = 1, seriesEndDate: Date?, notes: String? = nil) {
         let members = items.filter { $0.seriesID == seriesID }
         guard let reference = members.first else { return }
 
@@ -220,6 +239,7 @@ final class TaskStore: ObservableObject {
         template.priority = priority
         template.repeatRule = repeatRule
         template.repeatWeekdays = repeatWeekdays
+        template.repeatInterval = repeatInterval
         template.seriesEndDate = seriesEndDate
         if let notes { template.notes = notes }
         guard !template.title.isEmpty else { return }
@@ -232,6 +252,7 @@ final class TaskStore: ObservableObject {
             items[index].priority = priority
             items[index].repeatRule = repeatRule
             items[index].repeatWeekdays = repeatWeekdays
+            items[index].repeatInterval = repeatInterval
             items[index].seriesEndDate = seriesEndDate
             if let notes { items[index].notes = notes }
         }
@@ -269,6 +290,18 @@ final class TaskStore: ObservableObject {
     /// record of work already finished.
     func deleteSeries(_ seriesID: UUID, includingCompleted: Bool = false) {
         items.removeAll { $0.seriesID == seriesID && (includingCompleted || !$0.isCompleted) }
+    }
+
+    /// "Delete all" as asked from one occurrence: every pending occurrence,
+    /// plus `item` itself even when it's already completed — whichever card
+    /// the user hit delete on should always be the one that disappears.
+    /// Other completed occurrences stay as a record of work done.
+    func deleteSeries(containing item: TodoItem) {
+        guard let seriesID = item.seriesID else {
+            delete(item)
+            return
+        }
+        items.removeAll { $0.seriesID == seriesID && (!$0.isCompleted || $0.id == item.id) }
     }
 
     func toggleCompletion(_ item: TodoItem) {
@@ -332,7 +365,7 @@ final class TaskStore: ObservableObject {
         while index < ceiling {
             guard let candidate = template.repeatRule.occurrence(
                 index: index, from: start, weekdays: template.repeatWeekdays,
-                calendar: calendar) else { return }
+                interval: template.repeatInterval, calendar: calendar) else { return }
             if candidate > latest {
                 var next = template
                 next.id = UUID()
@@ -382,15 +415,20 @@ final class TaskStore: ObservableObject {
 
     // MARK: - Reordering
 
-    /// Drag a card onto another card: joins that card's column + subject
-    /// group and is inserted immediately before it. Manual from then on.
+    /// Drag a card onto another card: joins that card's column and is
+    /// inserted immediately before it. Manual from then on.
+    ///
+    /// Dropping onto a card used to adopt its category too, because a card's
+    /// position only meant something inside its category's group. Now that a
+    /// column is one flat list, moving a card is just a move — rewriting the
+    /// category from underneath the user would be a surprise.
     func reorder(_ id: UUID, before targetID: UUID) {
         guard id != targetID,
               let sourceIndex = items.firstIndex(where: { $0.id == id }),
               let target = items.first(where: { $0.id == targetID }) else { return }
 
         let siblings = items
-            .filter { $0.column == target.column && $0.course == target.course && $0.id != id }
+            .filter { $0.column == target.column && $0.id != id }
             .sorted { $0.manualOrder < $1.manualOrder }
         let targetPosition = siblings.firstIndex(where: { $0.id == targetID }) ?? 0
         let before = targetPosition > 0 ? siblings[targetPosition - 1].manualOrder : nil
@@ -401,7 +439,6 @@ final class TaskStore: ObservableObject {
         }
         items[sourceIndex].manualOrder = newOrder
         items[sourceIndex].column = target.column
-        items[sourceIndex].course = target.course
         items[sourceIndex].columnIsManual = true
     }
 
@@ -419,39 +456,28 @@ final class TaskStore: ObservableObject {
         Array(Set(items.compactMap(\.course))).sorted()
     }
 
-    struct SubjectGroup: Identifiable {
-        let subject: String
-        let tasks: [TodoItem]
-        var id: String { subject }
-    }
-
-    static let noCategoryLabel = "No Category"
-
     func count(in column: TaskColumn, course: String?) -> Int {
         items.filter { $0.column == column && (course == nil || $0.course == course) }.count
     }
 
-    /// Tasks in a column, grouped by subject (course) — subjects alphabetical
-    /// with "No Category" last, tasks within a group in manual/date order
-    /// (or by completion recency for the Completed column).
-    func groupedTasks(in column: TaskColumn, course: String?) -> [SubjectGroup] {
-        let filtered = items.filter { $0.column == column && (course == nil || $0.course == course) }
-        let buckets = Dictionary(grouping: filtered) { $0.course ?? Self.noCategoryLabel }
-        let subjects = buckets.keys.sorted { lhs, rhs in
-            if lhs == Self.noCategoryLabel { return false }
-            if rhs == Self.noCategoryLabel { return true }
-            return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
-        }
-        return subjects.map { subject in
-            let tasks = (buckets[subject] ?? []).sorted { lhs, rhs in
+    /// Tasks in a column as one flat, chronological list: soonest due first,
+    /// undated last, or most recently finished first in Completed.
+    ///
+    /// The sort key is `manualOrder` rather than the due date itself. It
+    /// starts out *as* the due date, so the default order is chronological
+    /// anyway, and it only diverges where the user has dragged a card into a
+    /// particular spot — which is what keeps drag-to-reorder meaningful and
+    /// what "Sort by Date" resets.
+    func tasks(in column: TaskColumn, course: String?) -> [TodoItem] {
+        items
+            .filter { $0.column == column && (course == nil || $0.course == course) }
+            .sorted { lhs, rhs in
                 if column == .completed {
                     return (lhs.completedAt ?? .distantPast) > (rhs.completedAt ?? .distantPast)
                 }
                 if lhs.manualOrder != rhs.manualOrder { return lhs.manualOrder < rhs.manualOrder }
                 return lhs.createdAt < rhs.createdAt
             }
-            return SubjectGroup(subject: subject, tasks: tasks)
-        }
     }
 
     var completedCount: Int {

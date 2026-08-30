@@ -2,22 +2,33 @@ import Foundation
 
 /// Round-trippable CSV for tasks.
 ///
-/// The format is deliberately human- and LLM-writable: friendly column names,
-/// word values instead of raw enum numbers ("high", not 3), and a split
-/// `due_date` / `due_time` so "due Tuesday, no particular time" is expressible.
-/// Only `title` is required — every other column may be omitted entirely or
-/// left blank, which is what makes an AI-generated file with just
-/// `title,category,due_date,repeat` a valid import.
+/// The columns are the controls of the task sheets, one for one — category,
+/// color, due date, due time, priority, repeat, end date, notes — so anything
+/// the app can express, a row can, and vice versa. Values are words, not enum
+/// numbers ("high", not 3), and `due_date` / `due_time` are split so "due
+/// Tuesday, no particular time" is expressible. Only `title` is required.
+///
+/// Two decisions here exist specifically to survive AI-written files, where
+/// the failure mode is never a wrong value — it's a row with the wrong number
+/// of fields, which silently shifts every column after the mistake:
+///
+/// - The whole repeat schedule is **one** `repeat` code (`2w:tue` is "every
+///   other Tuesday"), not a rule column plus a weekdays column. One fewer
+///   column is one fewer chance to misalign, and the code is self-describing
+///   in a way `weekly` + a separate day list is not.
+/// - `notes` is **last**. It's the field most likely to contain a comma the
+///   model forgot to quote, and at the end of the row that costs a truncated
+///   note; anywhere else it corrupts every column that follows.
 ///
 /// Export writes every column, so export → import → export is lossless and
 /// byte-stable.
 enum TaskCSV {
-    /// Full column set, in export order. The first ten (`authoringHeaders`)
+    /// Full column set, in export order. The first nine (`authoringHeaders`)
     /// are the ones a person or a model actually fills in; the trailing ones
     /// are bookkeeping that only matters for exact round-trips.
     static let headers = [
-        "title", "notes", "category", "category_color",
-        "due_date", "due_time", "priority", "repeat", "repeat_weekdays", "repeat_until",
+        "title", "category", "color", "due_date", "due_time", "priority",
+        "repeat", "repeat_until", "notes",
         "status", "list", "completed_at", "created_at", "id", "series_id", "manual_order",
     ]
 
@@ -25,7 +36,7 @@ enum TaskCSV {
     /// rest is bookkeeping the app regenerates, and asking for it is what
     /// made AI-written files come back malformed, so `aiPrompt` and
     /// `template()` both ask for exactly these.
-    static let authoringHeaders = Array(headers.prefix(10))
+    static let authoringHeaders = Array(headers.prefix(9))
 
     // MARK: - Category colors
 
@@ -40,6 +51,137 @@ enum TaskCSV {
     static func colorName(for hue: Double) -> String {
         if let match = colorNames.first(where: { abs($0.hue - hue) < 0.5 }) { return match.name }
         return String(format: "%g", hue)
+    }
+
+    /// Always a word, never a number: the closest named stop to `hue`, going
+    /// the short way round the wheel. The AI prompt lists the board's existing
+    /// categories with these names, and "cyan" is a far better instruction to
+    /// a model than "187".
+    static func nearestColorName(for hue: Double) -> String {
+        let wrapped = hue.truncatingRemainder(dividingBy: 360)
+        let normalized = wrapped < 0 ? wrapped + 360 : wrapped
+        let nearest = colorNames.min { left, right in
+            func distance(_ stop: Double) -> Double {
+                let raw = abs(stop - normalized)
+                return min(raw, 360 - raw)
+            }
+            return distance(left.hue) < distance(right.hue)
+        }
+        return nearest?.name ?? "blue"
+    }
+
+    // MARK: - Repeat codes
+
+    /// One decoded `repeat` cell.
+    struct ParsedRepeat {
+        var rule: RepeatRule = .none
+        var interval = 1
+        var weekdays: Set<Int> = []
+    }
+
+    /// The legend, in the order it's shown to the user and to the AI. Kept as
+    /// data so the prompt, the format doc, and the parser can't drift apart.
+    static let repeatLegend: [(code: String, meaning: String)] = [
+        ("(blank)", "doesn\u{2019}t repeat"),
+        ("d", "every day"),
+        ("3d", "every 3 days"),
+        ("w", "every week, on whatever day due_date falls on"),
+        ("2w", "every 2 weeks"),
+        ("w:mon wed fri", "every week on Mon, Wed and Fri"),
+        ("2w:tue", "every other Tuesday"),
+        ("m", "every month, on the same day of the month"),
+        ("3m", "every 3 months"),
+        ("12m", "every year"),
+    ]
+
+    /// Renders a task's schedule as a `repeat` code. Weekdays are separated by
+    /// spaces rather than commas so the cell never needs quoting.
+    static func repeatCode(rule: RepeatRule, interval: Int, weekdays: Set<Int>) -> String {
+        guard rule != .none else { return "" }
+        var code = interval > 1 ? String(interval) : ""
+        code += rule.unitCode
+        guard rule == .weekly, !weekdays.isEmpty else { return code }
+        let days = weekdays.sorted().compactMap { (1...7).contains($0) ? weekdayNames[$0 - 1] : nil }
+        return code + ":" + days.joined(separator: " ")
+    }
+
+    /// Reads a `repeat` cell. Deliberately forgiving, because this is the one
+    /// column a model is most likely to write in its own words: `2w`, `every
+    /// 2 weeks`, `biweekly`, `weekly on mon,wed` and `Every Other Week` all
+    /// land in the same place. Returns nil only for something unrecognisable,
+    /// which the caller reports as a warning rather than guessing at.
+    static func parseRepeat(_ raw: String) -> ParsedRepeat? {
+        var text = raw.lowercased().trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "-", with: " ")
+        guard !text.isEmpty else { return ParsedRepeat() }
+        if ["none", "never", "no", "n/a", "once", "one time", "0"].contains(text) {
+            return ParsedRepeat()
+        }
+
+        // A day list, however it was attached: "w:mon wed", "weekly on mon".
+        var weekdays: Set<Int> = []
+        for separator in [":", " on ", "@"] where text.contains(separator) {
+            guard let range = text.range(of: separator) else { continue }
+            weekdays = parseWeekdays(String(text[range.upperBound...])).days
+            text = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+            break
+        }
+
+        // "every"/"each" is noise; "other" is the word for an interval of 2.
+        var interval = 1
+        for filler in ["every ", "each ", "repeats ", "repeat "] where text.hasPrefix(filler) {
+            text.removeFirst(filler.count)
+        }
+        if text.hasPrefix("other ") {
+            interval = 2
+            text.removeFirst("other ".count)
+        }
+        let digits = text.prefix { $0.isNumber }
+        if !digits.isEmpty, let count = Int(digits) {
+            interval = max(1, count)
+            text.removeFirst(digits.count)
+        }
+        text = text.trimmingCharacters(in: .whitespaces)
+
+        // The unit, and how many of the base unit it stands for — a year is
+        // simply twelve months, which is why there's no separate rule for it.
+        let unit: (rule: RepeatRule, months: Int)
+        switch text {
+        case "d", "day", "days", "daily": unit = (.daily, 1)
+        case "w", "week", "weeks", "weekly": unit = (.weekly, 1)
+        case "m", "month", "months", "monthly": unit = (.monthly, 1)
+        case "y", "year", "years", "yearly", "annually", "annual": unit = (.monthly, 12)
+        case "biweekly", "fortnightly", "fortnight": unit = (.weekly, 2)
+        case "bimonthly": unit = (.monthly, 2)
+        case "weekday", "weekdays", "school day", "school days":
+            // Mon–Fri, the one named day-set worth understanding.
+            if weekdays.isEmpty { weekdays = [2, 3, 4, 5, 6] }
+            unit = (.weekly, 1)
+        default:
+            return nil
+        }
+
+        return ParsedRepeat(rule: unit.rule,
+                            interval: interval * unit.months,
+                            weekdays: unit.rule == .weekly ? weekdays : [])
+    }
+
+    /// Reads a day list in any of the shapes a person or model writes one:
+    /// "mon wed fri", "Monday, Wednesday", "2 4 6". Returns the days it
+    /// understood plus the tokens it didn\u{2019}t, so the caller can warn.
+    static func parseWeekdays(_ raw: String) -> (days: Set<Int>, unknown: [String]) {
+        var days = Set<Int>()
+        var unknown: [String] = []
+        for token in raw.lowercased().split(whereSeparator: { " ,;/|".contains($0) }).map(String.init) {
+            if let number = Int(token), (1...7).contains(number) {
+                days.insert(number)
+            } else if let index = weekdayNames.firstIndex(where: { token.hasPrefix($0) }) {
+                days.insert(index + 1)
+            } else {
+                unknown.append(token)
+            }
+        }
+        return (days, unknown)
     }
 
     static func hue(fromColor raw: String) -> Double? {
@@ -125,21 +267,18 @@ enum TaskCSV {
             }
         }
         let colorValue = item.course.flatMap { hues[$0] }.map(colorName(for:)) ?? ""
-        let weekdays = item.repeatWeekdays.sorted()
-            .compactMap { (1...7).contains($0) ? weekdayNames[$0 - 1] : nil }
-            .joined(separator: " ")
 
         return [
             item.title,
-            item.notes,
             item.course ?? "",
             colorValue,
             dueDay,
             dueTime,
             priorityName(item.priority),
-            item.repeatRule.rawValue,
-            weekdays,
+            repeatCode(rule: item.repeatRule, interval: item.repeatInterval,
+                       weekdays: item.repeatWeekdays),
             item.seriesEndDate.map(dayFormatter.string(from:)) ?? "",
+            item.notes,
             item.isCompleted ? "done" : "todo",
             item.column.rawValue,
             item.completedAt.map(stampFormatter.string(from:)) ?? "",
@@ -206,9 +345,16 @@ enum TaskCSV {
         var result = DecodeResult()
         for (offset, fields) in table.dropFirst().enumerated() {
             let lineNumber = offset + 2 // 1-based, and the header occupies line 1
-            func value(_ key: String) -> String {
-                guard let index = keys.firstIndex(of: key), index < fields.count else { return "" }
-                return fields[index].trimmingCharacters(in: .whitespaces)
+            /// First of `names` the file actually has a column for, so a CSV
+            /// written against the older header (`category_color`) still
+            /// reads correctly.
+            func value(_ names: String...) -> String {
+                for name in names {
+                    guard let index = keys.firstIndex(of: name), index < fields.count else { continue }
+                    let text = fields[index].trimmingCharacters(in: .whitespaces)
+                    if !text.isEmpty { return text }
+                }
+                return ""
             }
 
             // Skip blank padding rows rather than importing empty tasks —
@@ -260,33 +406,27 @@ enum TaskCSV {
                 }
             }
 
-            // Repeat rule
-            let repeatText = value("repeat").lowercased()
-            if !repeatText.isEmpty, repeatText != "none", repeatText != "never" {
-                if let rule = RepeatRule(rawValue: repeatText) {
-                    item.repeatRule = rule
+            // Repeat: one coded column ("2w:tue"). A file written against the
+            // older two-column shape still works — `parseRepeat` reads its
+            // plain "weekly", and `repeat_weekdays` supplies the days.
+            let repeatText = value("repeat", "repeats", "frequency")
+            if !repeatText.isEmpty {
+                if let parsed = parseRepeat(repeatText) {
+                    item.repeatRule = parsed.rule
+                    item.repeatInterval = parsed.interval
+                    item.repeatWeekdays = parsed.weekdays
                 } else {
-                    result.warnings.append("Line \(lineNumber): unknown repeat \u{201C}\(repeatText)\u{201D} — not repeating.")
+                    result.warnings.append("Line \(lineNumber): couldn\u{2019}t read repeat \u{201C}\(repeatText)\u{201D} — not repeating.")
                 }
             }
 
-            // Weekdays: "mon wed fri", "Monday,Wednesday", or "2 4 6".
             let weekdayText = value("repeat_weekdays")
-            if !weekdayText.isEmpty {
-                let tokens = weekdayText.lowercased()
-                    .split(whereSeparator: { " ,;/|".contains($0) })
-                    .map(String.init)
-                var weekdays = Set<Int>()
-                for token in tokens {
-                    if let number = Int(token), (1...7).contains(number) {
-                        weekdays.insert(number)
-                    } else if let index = weekdayNames.firstIndex(where: { token.hasPrefix($0) }) {
-                        weekdays.insert(index + 1)
-                    } else {
-                        result.warnings.append("Line \(lineNumber): unknown weekday \u{201C}\(token)\u{201D} — ignored.")
-                    }
+            if !weekdayText.isEmpty, item.repeatRule == .weekly, item.repeatWeekdays.isEmpty {
+                let parsed = parseWeekdays(weekdayText)
+                item.repeatWeekdays = parsed.days
+                for token in parsed.unknown {
+                    result.warnings.append("Line \(lineNumber): unknown weekday \u{201C}\(token)\u{201D} — ignored.")
                 }
-                item.repeatWeekdays = weekdays
             }
 
             // Completion
@@ -307,7 +447,11 @@ enum TaskCSV {
                     result.warnings.append("Line \(lineNumber): couldn\u{2019}t read repeat_until \u{201C}\(untilText)\u{201D} \u{2014} repeating with no end date.")
                 }
             }
-            if item.repeatRule == .none { item.seriesEndDate = nil }
+            if item.repeatRule == .none {
+                item.seriesEndDate = nil
+                item.repeatInterval = 1
+                item.repeatWeekdays = []
+            }
 
             // Bookkeeping columns — regenerated when absent, which is the
             // normal case for a hand-written or AI-written file.
@@ -339,7 +483,7 @@ enum TaskCSV {
             }
 
             result.rows.append(ImportedRow(item: item,
-                                            categoryHue: hue(fromColor: value("category_color")),
+                                            categoryHue: hue(fromColor: value("color", "category_color")),
                                             hadExplicitColumn: hadExplicitColumn,
                                             hadExplicitID: explicitID != nil))
         }
@@ -362,7 +506,7 @@ enum TaskCSV {
         guard let headerIndex = rows.firstIndex(where: { row in
             row.contains { $0.trimmingCharacters(in: .whitespaces).lowercased() == "title" }
         }) else {
-            return rows // No recognisable header; let decode() report the problem.
+            return headerless(rows)
         }
 
         let header = rows[headerIndex]
@@ -378,6 +522,46 @@ enum TaskCSV {
             result.append(row)
         }
         return result
+    }
+
+    /// Supplies the header for a paste that never had one — a bare
+    /// `Lab report,CSDS302,…` copied out of a file, or just a list of task
+    /// names. The columns are taken to be `authoringHeaders` in order, which
+    /// is the order the template, the AI prompt, and every documented example
+    /// use, cut to however wide the widest row actually is.
+    ///
+    /// Commentary is dropped the same way it is for a headed paste: when some
+    /// rows carry real fields, a row holding a single field is a sentence
+    /// ("Sure, here you go:") rather than a task. When *every* row holds one
+    /// field the paste is a plain list of titles, so all of them stay.
+    private static func headerless(_ rows: [[String]]) -> [[String]] {
+        let populated = rows.filter { row in
+            row.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        }
+        guard let widest = populated.map(\.count).max() else { return rows }
+        let kept = widest > 1 ? populated.filter { $0.count > 1 } : populated
+        guard !kept.isEmpty else { return rows }
+        return [Array(authoringHeaders.prefix(min(widest, authoringHeaders.count)))] + kept
+    }
+
+    /// True when `text` is a single CSV data row rather than a sentence
+    /// somebody typed, which is what lets the quick-add field accept both.
+    ///
+    /// Commas alone can't decide it — "Buy milk, eggs, bread" is a task, not a
+    /// row — so this insists on a positive signal: a `YYYY-MM-DD` field where
+    /// a date belongs, or the run of empty fields that only a generated row
+    /// has. Prose reaches neither bar.
+    static func looksLikeRow(_ text: String) -> Bool {
+        let rows = parse(text)
+        guard rows.count == 1, let fields = rows.first, fields.count >= 3 else { return false }
+        let trimmed = fields.map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let title = trimmed.first, !title.isEmpty else { return false }
+        // The header line on its own describes no task, so it isn't one.
+        guard title.lowercased() != "title" else { return false }
+
+        let hasDate = trimmed.contains { dayFormatter.date(from: $0) != nil }
+        let blanks = trimmed.filter(\.isEmpty).count
+        return hasDate || (fields.count >= 6 && blanks >= 2)
     }
 
     /// Models asked for a CSV often hand back a markdown table instead. Rather
@@ -509,17 +693,21 @@ enum TaskCSV {
 
     /// Starter file for the "fill it in, then import" workflow. Only the
     /// authoring columns are present — the bookkeeping ones are regenerated
-    /// on import, and including them just invited malformed rows.
+    /// on import, and including them just invited malformed rows. The sample
+    /// rows are chosen to demonstrate the whole `repeat` legend: a one-off, a
+    /// weekly, an every-other-week, a monthly, and a row that leaves almost
+    /// everything blank.
     static func template() -> String {
         let examples = [
-            ["Read chapter 4", "Skim the summary first", "History", "amber",
-             "2026-09-03", "", "medium", "", "", ""],
-            ["Discussion post", "", "History", "amber",
-             "2026-09-01", "23:59", "high", "weekly", "tue", "2026-12-11"],
-            ["Office hours", "", "CSDS302", "blue",
-             "2026-09-04", "14:30", "none", "weekly", "thu", ""],
-            ["Buy a lab notebook", "", "", "",
-             "", "", "low", "", "", ""],
+            ["Read chapter 4", "History", "amber", "2026-09-03", "", "medium", "", "",
+             "Skim the summary first"],
+            ["Discussion post", "History", "amber", "2026-09-01", "23:59", "high", "w:tue",
+             "2026-12-11", ""],
+            ["Lab report", "CSDS302", "blue", "2026-09-04", "17:00", "medium", "2w:fri",
+             "2026-12-11", "Every other Friday"],
+            ["Office hours", "CSDS302", "blue", "2026-09-04", "14:30", "none", "w:thu", "", ""],
+            ["Pay rent", "", "", "2026-09-01", "", "high", "m", "", ""],
+            ["Buy a lab notebook", "", "", "", "", "low", "", "", ""],
         ]
         var lines = [authoringHeaders.joined(separator: ",")]
         lines.append(contentsOf: examples.map { $0.map(escape).joined(separator: ",") })
@@ -528,77 +716,111 @@ enum TaskCSV {
 
     // MARK: - AI prompt
 
+    private static let promptDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEEE, yyyy-MM-dd"
+        return formatter
+    }()
+
     /// Instructions to paste into a chat with an AI, followed by a
     /// plain-English list of assignments, to get back an importable CSV.
     ///
-    /// Two things matter most here, both learned the hard way. It asks for
-    /// **only** the ten columns a human would fill in — earlier versions
-    /// listed all seventeen and told the model to leave seven of them blank,
-    /// which reliably produced rows with the wrong number of fields. And it
-    /// tells the model to **ask questions first** rather than inventing
-    /// details it wasn't given: an end date for a recurring task, a due time,
-    /// which course something belongs to, or what "next week" means.
-    static let aiPrompt = """
-    Help me turn my assignment list into a CSV I can import into my task app.
+    /// Everything here is a response to a way this actually failed:
+    ///
+    /// - **It states today's date.** A model has no reliable idea what day it
+    ///   is, so "the essay due next Friday" used to land in the wrong week —
+    ///   or in the wrong year.
+    /// - **It lists the board's existing categories and their colors**, so a
+    ///   generated file joins the categories already in use instead of
+    ///   inventing "Hist 101" alongside the "History" that's already there.
+    /// - **It asks for only the nine authoring columns.** Listing all sixteen
+    ///   and saying "leave these seven blank" reliably produced rows with the
+    ///   wrong number of fields.
+    /// - **It gives the repeat legend as a table**, which a model copies far
+    ///   more accurately than it follows a sentence describing a syntax.
+    /// - **It tells the model to ask questions first** rather than inventing
+    ///   an end date, a due time, or what "week 3" means.
+    static func aiPrompt(categories: [(name: String, color: String)] = [],
+                         today: Date = Date()) -> String {
+        let legend = repeatLegend
+            .map { "  " + $0.code.padding(toLength: 16, withPad: " ", startingAt: 0) + $0.meaning }
+            .joined(separator: "\n")
 
-    STEP 1 — ask me about anything I left out.
-    Do NOT guess and do NOT use placeholders. Before writing any CSV, ask me \
-    about anything you'd otherwise have to invent, especially:
-    - For anything recurring: what date should it stop on? (If I say it runs \
-    forever, leave repeat_until blank.)
-    - Vague dates: "next Friday", "end of the semester", "week 3" — ask me \
-    for the actual calendar date.
-    - A due time, if it matters for that task.
-    - Which course or subject a task belongs to, if I didn't say.
-    - Anything ambiguous about how often something repeats.
-    Ask all of your questions at once, in plain language, then wait for my \
-    answers. If genuinely nothing is unclear, say so and go straight to step 2.
+        var existingCategories = ""
+        if !categories.isEmpty {
+            let listed = categories.map { "  \($0.name) \u{2014} \($0.color)" }.joined(separator: "\n")
+            existingCategories = """
 
-    STEP 2 — once I've answered, reply with ONLY the CSV.
-    No commentary before or after, no code fences, no markdown table.
 
-    The first line must be exactly this header row:
-    \(authoringHeaders.joined(separator: ","))
+            I already use these categories. Reuse them exactly as written, with the \
+            color shown, and only invent a new category if something genuinely \
+            doesn't fit one of them:
+            \(listed)
+            """
+        }
 
-    Then one line per task, with all \(authoringHeaders.count) fields on every \
-    line (write nothing between two commas for a blank value). Only `title` \
-    is required. Wrap a value in "double quotes" if it contains a comma, a \
-    quote, or a line break.
+        return """
+        Turn my assignment list into a CSV I can import into StudyBlock, my task app.
 
-    Columns:
-    - title — the task name (required)
-    - notes — longer description, or blank
-    - category — course or subject, free text (e.g. History, CSDS302)
-    - category_color — one of: red, orange, amber, lime, green, spring, cyan, \
-    sky, blue, violet, magenta, pink. Use the SAME color every time the same \
-    category appears.
-    - due_date — YYYY-MM-DD. For a recurring task this is the FIRST due date.
-    - due_time — HH:mm, 24-hour (e.g. 23:59). Blank means "sometime that day".
-    - priority — none, low, medium, or high
-    - repeat — none, daily, weekly, or monthly. Blank means none.
-    - repeat_weekdays — only when repeat is weekly: space-separated days like \
-    "mon wed fri". Blank means it repeats on whatever weekday due_date falls on.
-    - repeat_until — YYYY-MM-DD, the last day a recurring task runs. Blank \
-    means it repeats indefinitely.
+        Today is \(promptDateFormatter.string(from: today)). Work out every date from that.
 
-    IMPORTANT about recurring tasks: write ONE line per recurring task, not \
-    one line per occurrence. My app creates the individual copies itself — up \
-    to \(RepeatRule.perpetualCount) of them for a task with no end date. Never \
-    write out "Discussion post week 1", "Discussion post week 2", and so on.
+        STEP 1 — ask before you guess.
+        If anything is missing or vague — "next Friday", "end of the semester", when \
+        a repeating task should stop, which course something belongs to, whether a \
+        due time matters — ask me about all of it at once, then wait for my answers. \
+        Never invent a date and never use a placeholder. If nothing is unclear, go \
+        straight to step 2.
 
-    Example of a valid reply:
-    \(authoringHeaders.joined(separator: ","))
-    Essay on the Reformation,"Thesis, outline, then draft",History,amber,2026-09-04,23:59,high,none,,
-    Discussion post,,History,amber,2026-09-01,23:59,high,weekly,tue,2026-12-11
-    Problem set,,CSDS302,blue,2026-09-05,,medium,weekly,fri,
-    Buy a lab notebook,,,,,,low,none,,
+        STEP 2 — reply with ONLY the CSV.
+        No commentary above or below it, no code fences, no markdown table.
 
-    Note the last two rows: a task with no category and no due date is fine — \
-    just leave those fields empty. A recurring task with a blank repeat_until \
-    repeats indefinitely.
+        The first line is exactly this header:
+        \(authoringHeaders.joined(separator: ","))
 
-    My assignments are:
-    """
+        Then one line per task, with all \(authoringHeaders.count) fields on every line \
+        — write nothing between two commas for a blank value. Only `title` is \
+        required. Wrap a field in "double quotes" if it contains a comma.
+
+        Columns, in order:
+          title         the task name
+          category      course or subject, free text (History, CSDS302, Chores)
+          color         red, orange, amber, lime, green, spring, cyan, sky, blue,
+                        violet, magenta, or pink — pick one per category and use the
+                        same one every time that category appears
+          due_date      YYYY-MM-DD. For a repeating task, its FIRST due date.
+          due_time      HH:mm on a 24-hour clock (23:59). Blank means sometime that day.
+          priority      none, low, medium, or high
+          repeat        a code from the legend below. Blank means it doesn't repeat.
+          repeat_until  YYYY-MM-DD, the last day a repeating task runs. Blank means
+                        it repeats indefinitely.
+          notes         anything else worth keeping. Last on the line on purpose.
+
+        The repeat legend:
+        \(legend)
+        The number in front is how many, the letter is the unit (d/w/m), and anything
+        after the ":" is the weekdays it lands on — weekly only, space-separated, from
+        mon tue wed thu fri sat sun.
+
+        Write ONE line per repeating task, never one line per occurrence. StudyBlock \
+        creates the individual copies itself. Never write "Discussion post week 1", \
+        "Discussion post week 2", and so on.\(existingCategories)
+
+        A valid reply looks exactly like this:
+        \(authoringHeaders.joined(separator: ","))
+        Essay on the Reformation,History,amber,2026-09-04,23:59,high,,,"Thesis, outline, then draft"
+        Discussion post,History,amber,2026-09-01,23:59,high,w:tue,2026-12-11,
+        Problem set,CSDS302,blue,2026-09-05,,medium,2w:fri,2026-12-11,
+        Lecture,CSDS302,blue,2026-09-02,10:00,none,w:mon wed,2026-12-09,
+        Pay rent,,,2026-10-01,,high,m,,
+        Buy a lab notebook,,,,,low,,,
+
+        Those last two rows are fine as they are: a task with no category, no due \
+        date, or no repeat just leaves those fields empty.
+
+        My assignments are:
+        """
+    }
 
     // MARK: - RFC 4180 plumbing
 

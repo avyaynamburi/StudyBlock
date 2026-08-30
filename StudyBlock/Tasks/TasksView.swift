@@ -51,6 +51,8 @@ struct TasksView: View {
                 store.update(updated)
             } onDelete: {
                 store.delete(task)
+            } onDeleteSeries: {
+                store.deleteSeries(containing: task)
             } onEditSeries: {
                 if let seriesID = task.seriesID, let template = store.seriesTemplate(for: seriesID) {
                     editingRecurringTask = template
@@ -64,6 +66,7 @@ struct TasksView: View {
                                                  dueDate: plan.dueDate, priority: plan.priority,
                                                  repeatRule: plan.repeatRule,
                                                  repeatWeekdays: plan.weekdays,
+                                                 repeatInterval: plan.interval,
                                                  seriesEndDate: plan.endDate)
                 csvMessage = CSVMessage(
                     title: "Created \(created) task\(created == 1 ? "" : "s")",
@@ -80,7 +83,7 @@ struct TasksView: View {
                 store.updateSeries(seriesID: seriesID, title: plan.title, course: plan.course,
                                    dueDate: plan.dueDate, priority: plan.priority,
                                    repeatRule: plan.repeatRule, repeatWeekdays: plan.weekdays,
-                                   seriesEndDate: plan.endDate)
+                                   repeatInterval: plan.interval, seriesEndDate: plan.endDate)
             } onDelete: {
                 if let seriesID = task.seriesID {
                     store.deleteSeries(seriesID)
@@ -96,7 +99,8 @@ struct TasksView: View {
             }
         }
         .sheet(isPresented: $showingCSVSheet) {
-            CSVSheet(onImport: runImport, onExport: runExport,
+            CSVSheet(categories: store.csvCategories,
+                     onImport: runImport, onExport: runExport,
                      onTemplate: saveTemplate, onPaste: runPasteImport)
         }
         .alert(item: $csvMessage) { message in
@@ -128,13 +132,28 @@ struct TasksView: View {
                 .font(.system(size: 14))
                 .focused($quickAddFocused)
                 .onSubmit {
-                    store.quickAdd(quickAddText, courseOverride: quickAddCourse)
+                    // One box, two languages: a pasted spreadsheet row goes
+                    // to the CSV importer, anything else to the quick-add
+                    // parser that understands "essay friday #history !!".
+                    if TaskCSV.looksLikeRow(quickAddText) {
+                        runPasteImport(quickAddText)
+                    } else {
+                        store.quickAdd(quickAddText, courseOverride: quickAddCourse)
+                    }
                     quickAddText = ""
                     quickAddCourse = nil
                 }
             CategoryPickerButton(selection: $quickAddCourse, courses: store.courses,
                                   courseColor: { store.color(for: $0) },
                                   onCreateCategory: { name, hue in store.setHue(hue, for: name) })
+            Button(action: pasteTasksFromClipboard) {
+                Image(systemName: "doc.on.clipboard")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(SoftPillButtonStyle())
+            .keyboardShortcut("v", modifiers: [.command, .shift])
+            .help("Paste tasks from CSV on the clipboard (\u{2318}\u{21E7}V) — one row or many, "
+                  + "with or without a header line")
             Button {
                 showingRecurringSheet = true
             } label: {
@@ -161,7 +180,7 @@ struct TasksView: View {
                         Divider().overlay(Theme.stroke).padding(.vertical, 6)
                     }
                     BoardColumn(column: column,
-                                groups: store.groupedTasks(in: column, course: courseFilter),
+                                tasks: store.tasks(in: column, course: courseFilter),
                                 count: store.count(in: column, course: courseFilter),
                                 timerRunning: timer.isRunning,
                                 courseColor: { store.color(for: $0) },
@@ -260,6 +279,21 @@ struct TasksView: View {
         }
     }
 
+    /// Imports whatever CSV is sitting on the clipboard. This is the only
+    /// route that takes more than one row at a time — the quick-add field is
+    /// single-line, so a multi-row paste loses its newlines on the way in.
+    private func pasteTasksFromClipboard() {
+        let text = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !text.isEmpty else {
+            csvMessage = CSVMessage(title: "Nothing on the clipboard",
+                                    detail: "Copy some CSV first \u{2014} a single row is enough, "
+                                        + "and it doesn\u{2019}t need a header line.")
+            return
+        }
+        runPasteImport(text)
+    }
+
     private func runPasteImport(_ text: String) {
         do {
             let summary = try store.importPastedCSV(text)
@@ -336,6 +370,8 @@ struct TasksView: View {
 /// The window behind the "CSV" button: import, export, and a ready-made AI
 /// prompt for generating an importable file from plain-English assignments.
 private struct CSVSheet: View {
+    /// Existing categories and their colors, baked into the AI prompt.
+    var categories: [(name: String, color: String)] = []
     let onImport: () -> Void
     let onExport: () -> Void
     let onTemplate: () -> Void
@@ -442,7 +478,7 @@ private struct CSVSheet: View {
             }
             actionRow(icon: "doc.on.clipboard",
                       title: "Paste CSV…",
-                      subtitle: "Paste text straight from a chat. Code fences, markdown tables, and the AI\u{2019}s commentary around it are all handled.") {
+                      subtitle: "Paste text straight from a chat. Code fences, markdown tables, and the AI\u{2019}s commentary around it are all handled. \u{2318}\u{21E7}V on the board does the same thing without opening this sheet.") {
                 withAnimation(.easeOut(duration: 0.15)) { page = .paste }
             }
             actionRow(icon: "sparkles",
@@ -457,7 +493,7 @@ private struct CSVSheet: View {
 
     private var pastePage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Paste the AI\u{2019}s whole reply — you don\u{2019}t need to clean it up first. StudyBlock finds the header row, converts a markdown table if it wrote one, and stops at the commentary underneath.")
+            Text("Paste the AI\u{2019}s whole reply — you don\u{2019}t need to clean it up first. StudyBlock finds the header row, converts a markdown table if it wrote one, and stops at the commentary underneath. A snippet with no header line works too: the columns are read in the standard order, so a bare row or a plain list of task names both import.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -468,7 +504,7 @@ private struct CSVSheet: View {
                     .scrollContentBackground(.hidden)
                     .padding(6)
                 if pastedText.isEmpty {
-                    Text("title,notes,category,…")
+                    Text("title,category,color,due_date,…")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 11)
@@ -508,14 +544,13 @@ private struct CSVSheet: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label("The prompt asks the AI to check with you first about anything you left out — when a repeating task should stop, a vague date, a missing due time — instead of guessing.",
-                  systemImage: "questionmark.bubble")
+            Label(promptHint, systemImage: "questionmark.bubble")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             ScrollView {
-                Text(TaskCSV.aiPrompt)
+                Text(prompt)
                     .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -528,7 +563,7 @@ private struct CSVSheet: View {
 
             Button {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(TaskCSV.aiPrompt, forType: .string)
+                NSPasteboard.general.setString(prompt, forType: .string)
                 copied = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { copied = false }
             } label: {
@@ -541,6 +576,21 @@ private struct CSVSheet: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
+    }
+
+    /// Built fresh each time the sheet opens so the date it states is today's
+    /// and the categories it lists are the ones currently on the board.
+    private var prompt: String {
+        TaskCSV.aiPrompt(categories: categories)
+    }
+
+    private var promptHint: String {
+        let base = "It tells the AI today\u{2019}s date, gives it a legend for repeating "
+            + "tasks (\u{201C}2w:tue\u{201D} is every other Tuesday), and asks it to check with "
+            + "you about anything you left out instead of guessing."
+        guard !categories.isEmpty else { return base }
+        return base + " It also lists your \(categories.count) existing "
+            + "categor\(categories.count == 1 ? "y" : "ies") so it reuses them."
     }
 
     private func actionRow(icon: String, title: String, subtitle: String,
@@ -619,7 +669,7 @@ private struct CompletedCounterPill: View {
 
 private struct BoardColumn: View {
     let column: TaskColumn
-    let groups: [TaskStore.SubjectGroup]
+    let tasks: [TodoItem]
     let count: Int
     let timerRunning: Bool
     let courseColor: (String) -> Color
@@ -653,26 +703,18 @@ private struct BoardColumn: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(groups) { group in
-                        if groups.count > 1 {
-                            Text(group.subject)
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
-                                .padding(.top, group.id == groups.first?.id ? 0 : 6)
-                        }
-                        ForEach(group.tasks) { task in
-                            TaskCard(task: task,
-                                     column: column,
-                                     showFocusButton: column == .backlog || column == .upcoming,
-                                     courseColor: courseColor,
-                                     onToggle: { onToggle(task) },
-                                     onFocus: timerRunning ? nil : { onFocus(task) },
-                                     onReorder: { droppedID in onReorder(droppedID, task.id) },
-                                     onSelect: { onSelect(task) },
-                                     onMove: { target in onMove(task.id, target) })
-                        }
+                    ForEach(tasks) { task in
+                        TaskCard(task: task,
+                                 column: column,
+                                 showFocusButton: column == .backlog || column == .upcoming,
+                                 courseColor: courseColor,
+                                 onToggle: { onToggle(task) },
+                                 onFocus: timerRunning ? nil : { onFocus(task) },
+                                 onReorder: { droppedID in onReorder(droppedID, task.id) },
+                                 onSelect: { onSelect(task) },
+                                 onMove: { target in onMove(task.id, target) })
                     }
-                    if groups.isEmpty {
+                    if tasks.isEmpty {
                         Text(emptyMessage)
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -699,7 +741,7 @@ private struct BoardColumn: View {
 
     private var emptyMessage: String {
         switch column {
-        case .backlog: return "Nothing here — add a task above."
+        case .backlog: return "Empty — tasks due more than a week out land here."
         case .upcoming: return "Nothing due soon."
         case .doing: return "Drag a task here to start it."
         case .completed: return "Nothing finished yet."
@@ -762,7 +804,7 @@ private struct TaskCard: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { onSelect?() }
-                .draggable(task.id.uuidString)
+                .draggable(task.id.uuidString) { dragPreview }
 
                 Spacer(minLength: 0)
                 if let onFocus, showFocusButton, hovering {
@@ -801,6 +843,7 @@ private struct TaskCard: View {
                     Image(systemName: "repeat")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.tertiary)
+                        .help(task.repeatRule.intervalLabel(task.repeatInterval))
                 }
                 if let course = task.course {
                     TagChip(text: course, color: courseColor(course))
@@ -820,12 +863,43 @@ private struct TaskCard: View {
             .padding(.leading, 27)
             .contentShape(Rectangle())
             .onTapGesture { onSelect?() }
-            .draggable(task.id.uuidString)
+            .draggable(task.id.uuidString) { dragPreview }
         }
         .padding(10)
         .background(cardBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
             .strokeBorder(borderColor, lineWidth: borderWidth))
+        // Where the card will land, drawn as the gap it will drop into: the
+        // target slides down to open a space and a line marks the seam.
+        .offset(y: isDropTargeted ? 5 : 0)
+        .overlay(alignment: .top) {
+            if isDropTargeted {
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(height: 3)
+                    .padding(.horizontal, 4)
+                    .offset(y: -6)
+            }
+        }
+        .contextMenu {
+            Button("Edit Task\u{2026}") { onSelect?() }
+            Button(task.isCompleted ? "Mark Incomplete" : "Mark Complete", action: onToggle)
+            if let onFocus, showFocusButton {
+                Button("Start Focus Session", action: onFocus)
+            }
+            if let onMove {
+                Divider()
+                Menu("Move to") {
+                    ForEach(TaskColumn.allCases.filter { $0 != column }) { target in
+                        Button {
+                            onMove(target)
+                        } label: {
+                            Label(target.rawValue, systemImage: target.icon)
+                        }
+                    }
+                }
+            }
+        }
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)
         .animation(.easeOut(duration: 0.1), value: isDropTargeted)
@@ -836,6 +910,55 @@ private struct TaskCard: View {
         } isTargeted: { targeted in
             isDropTargeted = targeted
         }
+    }
+
+    /// What you actually pick up. `.draggable` rasterises the view it's
+    /// attached to, and it's attached to the title text and the meta row —
+    /// the two places that aren't buttons, because putting it on the whole
+    /// card would swallow the checkbox's clicks. Without a preview you'd
+    /// therefore lift a bare line of text off a card that stays behind, which
+    /// is what made dragging feel like nothing had been picked up.
+    ///
+    /// The outer padding is load-bearing: the drag image is cut to the
+    /// preview's bounds, so a shadow given no room around it is clipped away
+    /// and the card lands flat.
+    private var dragPreview: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 9) {
+                Circle()
+                    .strokeBorder(Color.secondary.opacity(0.45), lineWidth: 1.5)
+                    .frame(width: 18, height: 18)
+                Text(task.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 6) {
+                if task.repeatRule != .none {
+                    Image(systemName: "repeat")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                if let course = task.course {
+                    TagChip(text: course, color: courseColor(course))
+                }
+                if let due = task.dueDate {
+                    Text(Self.dueLabel(for: due))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 27)
+        }
+        .padding(10)
+        .frame(width: 226, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .strokeBorder(Theme.accent.opacity(0.65), lineWidth: 1.5))
+        .shadow(color: .black.opacity(0.30), radius: 14, y: 7)
+        .rotationEffect(.degrees(-1.5))
+        .padding(16)
     }
 
     private var priorityColor: Color {
@@ -903,17 +1026,34 @@ private struct ScreenConfettiOverlay: View {
     let trigger: Int
     @State private var pieces: [ScreenConfettiPiece] = []
     @State private var animate = false
+    /// Identifies the burst in flight, so a burst that ends while a newer one
+    /// is running doesn't sweep the newer one's pieces off the screen.
+    @State private var burst = 0
+
+    /// Longest a burst can last: the last piece to launch, falling slowest.
+    private static let maxLifetime = ScreenConfettiPiece.maxDelay + ScreenConfettiPiece.maxDuration
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 ForEach(pieces) { piece in
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(piece.color)
-                        .frame(width: piece.size, height: piece.size * 0.4)
+                    shape(for: piece)
                         .rotationEffect(.degrees(animate ? piece.endRotation : piece.startRotation))
-                        .position(x: piece.x * proxy.size.width, y: animate ? proxy.size.height + 40 : -20)
+                        .rotation3DEffect(.degrees(animate ? piece.tumble : 0), axis: piece.axis)
+                        .position(x: (animate ? piece.endX : piece.startX) * proxy.size.width,
+                                  y: animate ? proxy.size.height + 40 : -30)
+                        // Each piece carries its own curve, delay and duration.
+                        // This modifier is what makes them independent — the
+                        // single shared `withAnimation` this replaced moved all
+                        // of them on one clock, which is why the burst looked
+                        // like one line sweeping down the screen.
+                        .animation(.easeIn(duration: piece.duration).delay(piece.delay), value: animate)
+                        // Applied below the animation above, so it governs only
+                        // the fade: pieces stay solid on the way down and go out
+                        // near the end of their own fall rather than all at once.
                         .opacity(animate ? 0 : 1)
+                        .animation(.easeOut(duration: 0.45)
+                            .delay(piece.delay + piece.duration - 0.45), value: animate)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -922,11 +1062,30 @@ private struct ScreenConfettiOverlay: View {
         .allowsHitTesting(false)
     }
 
+    @ViewBuilder
+    private func shape(for piece: ScreenConfettiPiece) -> some View {
+        if piece.isRound {
+            Circle()
+                .fill(piece.color)
+                .frame(width: piece.size, height: piece.size)
+        } else {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(piece.color)
+                .frame(width: piece.size, height: piece.size * 0.45)
+        }
+    }
+
     private func fire() {
-        pieces = (0..<60).map { _ in ScreenConfettiPiece() }
+        burst += 1
+        let current = burst
+        pieces = (0..<110).map { _ in ScreenConfettiPiece() }
         animate = false
-        withAnimation(.easeIn(duration: 1.1)) { animate = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+        // Deferred a tick so SwiftUI sees false → true as a real change, and
+        // set plainly rather than inside `withAnimation`, which would override
+        // every piece's own animation with one shared curve.
+        DispatchQueue.main.async { animate = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.maxLifetime + 0.3) {
+            guard current == burst else { return }
             pieces = []
             animate = false
         }
@@ -934,20 +1093,45 @@ private struct ScreenConfettiOverlay: View {
 }
 
 private struct ScreenConfettiPiece: Identifiable {
+    static let maxDelay = 0.6
+    static let maxDuration = 2.1
+
     let id = UUID()
     let color: Color
-    let x: CGFloat
+    /// Start and end as fractions of the overlay's width: a piece drifts
+    /// sideways on the way down instead of dropping down a fixed rail.
+    let startX: CGFloat
+    let endX: CGFloat
     let size: CGFloat
+    /// A quarter of the pieces are round, so the burst isn't 110 identical
+    /// rectangles.
+    let isRound: Bool
     let startRotation: Double
     let endRotation: Double
+    /// Tumble through a random 3D axis — a piece that turns edge-on and
+    /// briefly disappears reads as paper rather than a falling brick.
+    let tumble: Double
+    let axis: (x: CGFloat, y: CGFloat, z: CGFloat)
+    /// Staggered launch and an individual fall time. These two are the whole
+    /// difference between confetti and a curtain.
+    let delay: Double
+    let duration: Double
 
     init() {
         let colors: [Color] = [Theme.accent, Theme.violet, Theme.success, Theme.amber, Theme.danger]
         color = colors.randomElement() ?? Theme.accent
-        x = CGFloat.random(in: 0.02...0.98)
-        size = CGFloat.random(in: 6...11)
+        startX = CGFloat.random(in: 0.02...0.98)
+        // Clamped loosely rather than to 0...1: a piece is allowed to drift
+        // off the edge, which looks better than one sliding along it.
+        endX = min(1.08, max(-0.08, startX + CGFloat.random(in: -0.16...0.16)))
+        size = CGFloat.random(in: 5...12)
+        isRound = Double.random(in: 0...1) < 0.25
         startRotation = Double.random(in: 0...360)
-        endRotation = startRotation + Double.random(in: 180...720)
+        endRotation = startRotation + Double.random(in: 240...900)
+        tumble = Double.random(in: 360...1440)
+        axis = (CGFloat.random(in: 0...1), CGFloat.random(in: 0...1), CGFloat.random(in: 0.2...1))
+        delay = Double.random(in: 0...Self.maxDelay)
+        duration = Double.random(in: 1.1...Self.maxDuration)
     }
 }
 
@@ -1066,7 +1250,8 @@ private struct NewCategorySheet: View {
 
 // MARK: - Weekday picker
 
-private struct WeekdayPicker: View {
+/// Shared by the recurring-task sheet and the block-schedule editor.
+struct WeekdayPicker: View {
     @Binding var selection: Set<Int>
     private static let symbols = ["S", "M", "T", "W", "T", "F", "S"]
 
@@ -1174,6 +1359,8 @@ struct SeriesPlan {
     var priority: TaskPriority
     var repeatRule: RepeatRule
     var weekdays: Set<Int>
+    /// Periods between occurrences — 2 with `.weekly` is "every other week".
+    var interval: Int
     /// Last day the series runs, or nil for "repeats indefinitely".
     var endDate: Date?
 }
@@ -1195,6 +1382,7 @@ struct RecurringTaskSheet: View {
     @State private var priority: TaskPriority
     @State private var repeatRule: RepeatRule
     @State private var weekdays: Set<Int>
+    @State private var interval: Int
     @State private var dueDate: Date
     @State private var hasDueTime: Bool
     @State private var dueTime: Date
@@ -1221,6 +1409,7 @@ struct RecurringTaskSheet: View {
         _priority = State(initialValue: existing?.priority ?? .none)
         _repeatRule = State(initialValue: existing.map { $0.repeatRule == .none ? .weekly : $0.repeatRule } ?? .weekly)
         _weekdays = State(initialValue: existing?.repeatWeekdays ?? [])
+        _interval = State(initialValue: existing?.repeatInterval ?? 1)
 
         let due = existing?.dueDate ?? Calendar.current.startOfDay(for: .now)
         _dueDate = State(initialValue: Calendar.current.startOfDay(for: due))
@@ -1242,7 +1431,7 @@ struct RecurringTaskSheet: View {
         var template = TodoItem(title: "preview", repeatRule: repeatRule, repeatWeekdays: weekdays)
         template.seriesEndDate = hasEndDate ? endDate : nil
         return repeatRule.occurrences(startingAt: combinedDueDate, weekdays: weekdays,
-                                      endDate: template.seriesEndDate,
+                                      interval: interval, endDate: template.seriesEndDate,
                                       limit: RepeatRule.materializedCount(hasEndDate: hasEndDate))
     }
 
@@ -1308,6 +1497,20 @@ struct RecurringTaskSheet: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
+
+                        Divider().overlay(Theme.stroke)
+                        HStack {
+                            Text("How often").font(.callout)
+                            Spacer()
+                            Text(repeatRule.intervalLabel(interval))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                            Stepper("", value: $interval, in: 1...52)
+                                .labelsHidden()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
 
                         if repeatRule == .weekly {
                             Divider().overlay(Theme.stroke)
@@ -1417,7 +1620,8 @@ struct RecurringTaskSheet: View {
                 Button(existing == nil ? "Add Tasks" : "Save Series") {
                     onSave(SeriesPlan(title: title, course: course, dueDate: combinedDueDate,
                                       priority: priority, repeatRule: repeatRule,
-                                      weekdays: weekdays, endDate: hasEndDate ? endDate : nil))
+                                      weekdays: weekdays, interval: interval,
+                                      endDate: hasEndDate ? endDate : nil))
                     dismiss()
                 }
                 .buttonStyle(ProminentPillButtonStyle())
@@ -1456,6 +1660,10 @@ struct TaskEditSheet: View {
     var seriesPendingCount: Int = 0
     let onSave: (TodoItem) -> Void
     let onDelete: () -> Void
+    /// Deletes the rest of the series alongside this task. Absent for a task
+    /// that isn't part of one, which is what keeps the delete button a plain
+    /// one-tap delete there instead of asking a pointless question.
+    var onDeleteSeries: (() -> Void)?
     var onEditSeries: (() -> Void)?
     var courseColor: (String) -> Color = { _ in Theme.accent }
     var onCreateCategory: (_ name: String, _ hue: Double) -> Void = { _, _ in }
@@ -1463,10 +1671,12 @@ struct TaskEditSheet: View {
     @State private var hasDueDate: Bool
     @State private var hasDueTime: Bool
     @State private var dueTime: Date
+    @State private var showingDeleteChoice = false
 
     init(task: TodoItem, courses: [String], seriesPendingCount: Int = 0,
          onSave: @escaping (TodoItem) -> Void,
-         onDelete: @escaping () -> Void, onEditSeries: (() -> Void)? = nil,
+         onDelete: @escaping () -> Void, onDeleteSeries: (() -> Void)? = nil,
+         onEditSeries: (() -> Void)? = nil,
          courseColor: @escaping (String) -> Color = { _ in Theme.accent },
          onCreateCategory: @escaping (_ name: String, _ hue: Double) -> Void = { _, _ in }) {
         _task = State(initialValue: task)
@@ -1479,6 +1689,7 @@ struct TaskEditSheet: View {
         _dueTime = State(initialValue: task.dueDate ?? Date())
         self.onSave = onSave
         self.onDelete = onDelete
+        self.onDeleteSeries = onDeleteSeries
         self.onEditSeries = onEditSeries
         self.courseColor = courseColor
         self.onCreateCategory = onCreateCategory
@@ -1604,6 +1815,22 @@ struct TaskEditSheet: View {
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
 
+                                if task.repeatRule != .none {
+                                    Divider().overlay(Theme.stroke)
+                                    HStack {
+                                        Text("How often").font(.callout)
+                                        Spacer()
+                                        Text(task.repeatRule.intervalLabel(task.repeatInterval))
+                                            .font(.callout)
+                                            .foregroundStyle(.secondary)
+                                            .monospacedDigit()
+                                        Stepper("", value: $task.repeatInterval, in: 1...52)
+                                            .labelsHidden()
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                }
+
                                 if task.repeatRule == .weekly {
                                     Divider().overlay(Theme.stroke)
                                     VStack(alignment: .leading, spacing: 8) {
@@ -1652,12 +1879,30 @@ struct TaskEditSheet: View {
 
             HStack {
                 Button {
-                    onDelete()
-                    dismiss()
+                    if seriesDeleteCount > 1 {
+                        showingDeleteChoice = true
+                    } else {
+                        onDelete()
+                        dismiss()
+                    }
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
                 .buttonStyle(SoftPillButtonStyle(tint: Theme.danger))
+                .confirmationDialog("This task repeats.", isPresented: $showingDeleteChoice) {
+                    Button("Delete Just This One") {
+                        onDelete()
+                        dismiss()
+                    }
+                    Button("Delete All \(seriesDeleteCount) Tasks", role: .destructive) {
+                        onDeleteSeries?()
+                        dismiss()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Delete only the \(dueLabel) occurrence, or every remaining one in the series? "
+                         + "Occurrences you\u{2019}ve already completed are kept either way.")
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(SoftPillButtonStyle())
@@ -1667,6 +1912,7 @@ struct TaskEditSheet: View {
                         task.dueDate = nil
                         task.repeatRule = .none
                         task.repeatWeekdays = []
+                        task.repeatInterval = 1
                     } else if let due = task.dueDate {
                         task.dueDate = hasDueTime
                             ? combineDateAndTime(date: due, time: dueTime)
@@ -1683,6 +1929,22 @@ struct TaskEditSheet: View {
         }
         .frame(width: 440, height: 480)
         .background(Theme.bg)
+    }
+
+    /// How many tasks "Delete All" would actually remove: every pending
+    /// occurrence, plus this one when it's already completed (it isn't
+    /// counted among the pending ones). 1 or 0 means there's nothing to ask
+    /// about — deleting this task is the whole story.
+    private var seriesDeleteCount: Int {
+        guard task.seriesID != nil, onDeleteSeries != nil else { return 1 }
+        return seriesPendingCount + (task.isCompleted ? 1 : 0)
+    }
+
+    /// Names the occurrence being deleted by its due date, so the choice
+    /// reads as a date rather than an abstract "this one."
+    private var dueLabel: String {
+        guard let due = task.dueDate else { return "this" }
+        return due.formatted(.dateTime.month(.abbreviated).day())
     }
 
     private func sheetField<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
