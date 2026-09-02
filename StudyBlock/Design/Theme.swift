@@ -3,46 +3,57 @@ import SwiftUI
 
 // MARK: - Palette
 
-/// StudyBlock's design system. One signature indigo→violet gradient, deep
-/// indigo-tinted dark surfaces, warm paper light mode, hairline strokes.
-/// Chart/accent hues validated for contrast on both card surfaces
-/// (light #5B5BD6 on #FFFFFF, dark #7C7CF0 on #1C1C2A).
+/// StudyBlock's design system: matte neutral greys, flat fills, hairline
+/// strokes. There are no gradients and no coloured glows anywhere — depth
+/// comes from a surface stepping one shade off its background and a 1px
+/// stroke, the way a well-behaved developer tool does it.
+///
+/// The greys are deliberately *neutral* (equal R/G/B). The palette this
+/// replaced tinted every surface indigo, which is what made the app read as
+/// decorated rather than built.
 enum Theme {
-    // Planes
-    static let bg = Color(light: 0xF2F1F7, dark: 0x0E0E16)
-    static let sidebar = Color(light: 0xEAE9F2, dark: 0x12121C)
-    static let surface = Color(light: 0xFFFFFF, dark: 0x1C1C2A)
-    static let surfaceLow = Color(light: 0xF3F2F8, dark: 0x242436)
-    static let stroke = Color(light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.07, darkAlpha: 0.08)
+    // Planes — four steps of neutral grey, each one shade off the last.
+    static let bg = Color(light: 0xF4F4F5, dark: 0x131313)
+    static let sidebar = Color(light: 0xEDEDEE, dark: 0x171717)
+    static let surface = Color(light: 0xFFFFFF, dark: 0x1E1E1E)
+    static let surfaceLow = Color(light: 0xEFEFF0, dark: 0x262626)
+    static let stroke = Color(light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.10, darkAlpha: 0.10)
 
-    // Signature accent
-    static let accent = Color(light: 0x5B5BD6, dark: 0x7C7CF0)
-    static let violet = Color(light: 0x8B5CF6, dark: 0xA78BFA)
-    static let accentSoft = Color(light: 0x5B5BD6, dark: 0x7C7CF0, lightAlpha: 0.12, darkAlpha: 0.18)
+    /// One restrained steel blue, desaturated enough to sit inside a grey UI
+    /// without shouting. It marks state — on, selected, due — and nothing
+    /// else, so a screen has at most a few square centimetres of colour.
+    static let accent = Color(light: 0x40607C, dark: 0x8CA9C4)
+    /// Flat fill for a control that is switched on — a filled button, a live
+    /// toggle track, a ticked checkbox. Named for what it does rather than how
+    /// it's drawn, so it can never quietly become a gradient again.
+    ///
+    /// Deliberately *darker* than `accent` in dark mode rather than lighter.
+    /// Everything drawn on this fill is white, and the lighter shade `accent`
+    /// uses for text reached only 2.97:1 behind white — this one is 5.58:1.
+    static let accentFill = Color(light: 0x40607C, dark: 0x4A6B8A)
+    static let accentSoft = Color(light: 0x40607C, dark: 0x8CA9C4, lightAlpha: 0.12, darkAlpha: 0.16)
 
-    // Semantic
-    static let success = Color(light: 0x1F9D55, dark: 0x3DCB82)
-    static let successSoft = Color(light: 0x1F9D55, dark: 0x3DCB82, lightAlpha: 0.13, darkAlpha: 0.16)
-    static let amber = Color(light: 0xA16207, dark: 0xF0B33C)
-    static let amberSoft = Color(light: 0xD9A425, dark: 0xF0B33C, lightAlpha: 0.16, darkAlpha: 0.14)
-    static let danger = Color(light: 0xCE4444, dark: 0xF07070)
-    static let dangerSoft = Color(light: 0xCE4444, dark: 0xF07070, lightAlpha: 0.12, darkAlpha: 0.15)
-
-    static var accentGradient: LinearGradient {
-        LinearGradient(colors: [accent, violet], startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
+    // Semantic — muted to the same matte level as the accent.
+    static let success = Color(light: 0x3D7048, dark: 0x7FAC89)
+    static let successSoft = Color(light: 0x3D7048, dark: 0x7FAC89, lightAlpha: 0.12, darkAlpha: 0.15)
+    static let amber = Color(light: 0x87652C, dark: 0xC2A165)
+    static let amberSoft = Color(light: 0x87652C, dark: 0xC2A165, lightAlpha: 0.13, darkAlpha: 0.14)
+    static let danger = Color(light: 0x9C4B4B, dark: 0xC08585)
+    static let dangerSoft = Color(light: 0x9C4B4B, dark: 0xC08585, lightAlpha: 0.12, darkAlpha: 0.15)
+    /// Kept for the confetti mix, muted to match the rest.
+    static let violet = Color(light: 0x5E5470, dark: 0xA79CB8)
 
     /// Evenly spaced hues (0..<360) offered by the category color picker.
-    /// Saturation/brightness are fixed by `categoryPastel`/`categoryInk`, so
-    /// every swatch reads as a soft pastel — never neon, never dark.
+    /// Saturation is held low by `categoryPastel`/`categoryInk` so a category
+    /// still reads as a distinct colour without breaking the matte surface.
     static let categoryHueSteps: [Double] = stride(from: 0, to: 360, by: 30).map { $0 }
 
-    /// The swatch shown in the category color picker itself — pale and
-    /// gentle, so nothing selectable there can read as "too bright."
+    /// The swatch shown in the category color picker itself — desaturated to
+    /// sit against grey rather than glow off it.
     static func categoryPastel(hue: Double) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            return NSColor(hue: hue / 360, saturation: isDark ? 0.30 : 0.30, brightness: isDark ? 0.34 : 0.95, alpha: 1)
+            return NSColor(hue: hue / 360, saturation: 0.20, brightness: isDark ? 0.36 : 0.93, alpha: 1)
         })
     }
 
@@ -51,13 +62,35 @@ enum Theme {
     static func categoryInk(hue: Double) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            return NSColor(hue: hue / 360, saturation: isDark ? 0.45 : 0.62, brightness: isDark ? 0.80 : 0.52, alpha: 1)
+            return NSColor(hue: hue / 360, saturation: isDark ? 0.30 : 0.42, brightness: isDark ? 0.78 : 0.48, alpha: 1)
         })
     }
 
     // Typography
-    static func number(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+    // MARK: - Type
+
+    /// The app's UI face. Helvetica Neue is a neutral grotesque — flatter and
+    /// quieter at small sizes than the system font's humanist shapes — and
+    /// it ships on every Mac. `Font.custom` falls back to the system font if
+    /// it somehow isn't there, so this can't render nothing.
+    ///
+    /// Every size in the app goes through here, so swapping the face is a
+    /// one-line change: put `.system(size:weight:)` in the body below.
+    static let uiFace = "Helvetica Neue"
+
+    static func ui(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .custom(uiFace, fixedSize: size).weight(weight)
+    }
+
+    /// Figures — monospaced digits so a counting timer doesn't jitter.
+    static func number(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        ui(size, weight).monospacedDigit()
+    }
+
+    /// Code, CSV and the unlock challenge, where character shapes have to be
+    /// unambiguous. Stays on the system monospace face.
+    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight, design: .monospaced)
     }
 }
 
@@ -80,22 +113,38 @@ extension NSColor {
     }
 }
 
-// MARK: - Card
+// MARK: - Sections
 
-private struct CardModifier: ViewModifier {
+/// A page section. Deliberately *not* a box: sections share the page's own
+/// background and are told apart by a heading and by space, so a screen reads
+/// as one continuous surface rather than a stack of floating panels.
+///
+/// The bordered, filled, drop-shadowed card this replaced is what made every
+/// page look like several small apps pinned to a board.
+private struct SectionModifier: ViewModifier {
     var padding: CGFloat
 
     func body(content: Content) -> some View {
         content
-            .padding(padding)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
-            .shadow(color: .black.opacity(0.10), radius: 16, y: 6)
+            // No horizontal inset: that padding existed to hold content off a
+            // card border, and there is no border now. What's kept is a little
+            // vertical rhythm, scaled from whatever the section asked for.
+            .padding(.vertical, padding == 0 ? 0 : max(6, padding * 0.4))
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 extension View {
-    func card(padding: CGFloat = 20) -> some View { modifier(CardModifier(padding: padding)) }
+    func card(padding: CGFloat = 20) -> some View { modifier(SectionModifier(padding: padding)) }
+
+    /// A hairline rule between sections — the only thing separating them now
+    /// that they no longer sit in boxes.
+    func sectionDivider() -> some View {
+        VStack(spacing: 0) {
+            self
+            Divider().overlay(Theme.stroke).padding(.top, 16)
+        }
+    }
 }
 
 // MARK: - Page scaffolding
@@ -116,10 +165,10 @@ struct PageHeader<Trailing: View>: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .font(Theme.ui(26, .semibold))
                 if let subtitle {
                     Text(subtitle)
-                        .font(.callout)
+                        .font(Theme.ui(12))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -142,13 +191,13 @@ struct EmptyState: View {
             ZStack {
                 Circle().fill(Theme.accentSoft).frame(width: 64, height: 64)
                 Image(systemName: icon)
-                    .font(.system(size: 26, weight: .medium))
+                    .font(Theme.ui(26, .medium))
                     .foregroundStyle(Theme.accent)
             }
-            Text(title).font(.headline)
+            Text(title).font(Theme.ui(13, .semibold))
             if let message {
                 Text(message)
-                    .font(.callout)
+                    .font(Theme.ui(12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 340)
@@ -167,55 +216,59 @@ struct TagChip: View {
 
     var body: some View {
         Text(text)
-            .font(.caption.weight(.semibold))
+            .font(Theme.ui(10, .semibold))
             .foregroundStyle(color)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(color.opacity(0.14), in: Capsule())
+            .background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
     }
 }
 
 // MARK: - Button styles
 
-/// Filled gradient pill — the one prominent action per screen.
+/// The one prominent action per screen: a flat accent fill, no glow, and a
+/// press state carried by shade rather than by scale.
 struct ProminentPillButtonStyle: ButtonStyle {
     var size: ControlSize = .regular
 
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 4, style: .continuous) }
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(size == .large ? .body.weight(.semibold) : .callout.weight(.semibold))
+            .font(size == .large ? .body.weight(.semibold) : .callout.weight(.medium))
             .foregroundStyle(.white)
-            .padding(.horizontal, size == .large ? 20 : 14)
-            .padding(.vertical, size == .large ? 10 : 7)
-            .background(Theme.accentGradient, in: Capsule())
-            .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
-            .shadow(color: Theme.accent.opacity(configuration.isPressed ? 0.1 : 0.35),
-                    radius: configuration.isPressed ? 4 : 10, y: 3)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
-            .contentShape(Capsule())
+            .padding(.horizontal, size == .large ? 18 : 13)
+            .padding(.vertical, size == .large ? 9 : 6)
+            .background(Theme.accentFill.opacity(configuration.isPressed ? 0.80 : 1), in: shape)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .contentShape(shape)
     }
 }
 
-/// Quiet pill on the low surface — secondary actions.
+/// Quiet button on the low surface — secondary actions.
 struct SoftPillButtonStyle: ButtonStyle {
     var tint: Color?
 
     @State private var hovering = false
 
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 4, style: .continuous) }
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.callout.weight(.medium))
+            .font(Theme.ui(12, .medium))
             .foregroundStyle(tint ?? .primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background((tint?.opacity(hovering ? 0.18 : 0.12) ?? Theme.surfaceLow.opacity(hovering ? 1 : 0.8)), in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.stroke, lineWidth: 1))
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.easeOut(duration: 0.15), value: hovering)
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
-            .contentShape(Capsule())
+            .padding(.horizontal, 13)
+            .padding(.vertical, 6)
+            .background(background(pressed: configuration.isPressed), in: shape)
+            .overlay(shape.strokeBorder(Theme.stroke, lineWidth: 1))
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .contentShape(shape)
             .onHover { hovering = $0 }
+    }
+
+    private func background(pressed: Bool) -> Color {
+        if let tint { return tint.opacity(pressed ? 0.20 : (hovering ? 0.14 : 0.09)) }
+        return Theme.surfaceLow.opacity(pressed ? 0.7 : (hovering ? 1 : 0.85))
     }
 }
 
@@ -229,17 +282,20 @@ struct IconButtonStyle: ButtonStyle {
         configuration.label
             .foregroundStyle(hovering ? Color.primary : tint)
             .padding(5)
-            .background(Circle().fill(hovering ? Theme.surfaceLow : .clear))
-            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+            .background(RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(hovering ? Theme.surfaceLow : .clear))
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
             .animation(.easeOut(duration: 0.12), value: hovering)
-            .contentShape(Circle())
+            .contentShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             .onHover { hovering = $0 }
     }
 }
 
 // MARK: - Toggle styles
 
-/// Custom switch: capsule with gradient fill when on.
+/// Flat switch: the track takes a solid accent fill when on. Named "Glow"
+/// from when it had one; the name is kept only because it's used in a dozen
+/// files, and there is nothing glowing about it now.
 struct GlowToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button {
@@ -250,13 +306,12 @@ struct GlowToggleStyle: ToggleStyle {
                 Spacer()
                 ZStack(alignment: configuration.isOn ? .trailing : .leading) {
                     Capsule()
-                        .fill(configuration.isOn ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Theme.surfaceLow))
+                        .fill(configuration.isOn ? Theme.accentFill : Theme.surfaceLow)
                         .overlay(Capsule().strokeBorder(Theme.stroke, lineWidth: 1))
-                        .frame(width: 46, height: 27)
+                        .frame(width: 42, height: 24)
                     Circle()
-                        .fill(.white)
-                        .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
-                        .frame(width: 21, height: 21)
+                        .fill(configuration.isOn ? .white : Color.secondary.opacity(0.75))
+                        .frame(width: 18, height: 18)
                         .padding(3)
                 }
                 .animation(.spring(response: 0.25, dampingFraction: 0.75), value: configuration.isOn)
@@ -275,14 +330,14 @@ struct CheckToggleStyle: ToggleStyle {
         } label: {
             HStack(spacing: 8) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(configuration.isOn ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Theme.surfaceLow))
-                        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(configuration.isOn ? Theme.accentFill : Theme.surfaceLow)
+                        .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous)
                             .strokeBorder(configuration.isOn ? .clear : Theme.stroke, lineWidth: 1))
                         .frame(width: 17, height: 17)
                     if configuration.isOn {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(Theme.ui(10, .semibold))
                             .foregroundStyle(.white)
                     }
                 }

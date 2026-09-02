@@ -41,7 +41,7 @@ struct StatsView: View {
     private var weekChart: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Focused minutes — last 7 days")
-                .font(.system(size: 15, weight: .semibold))
+                .font(Theme.ui(15, .semibold))
             Chart(stats.dailyMinutes(days: 7), id: \.day) { entry in
                 BarMark(
                     x: .value("Day", entry.day, unit: .day),
@@ -54,7 +54,7 @@ struct StatsView: View {
                     // Selective direct label: today only; the axis carries the rest.
                     if Calendar.current.isDateInToday(entry.day), entry.minutes > 0 {
                         Text(minutesLabel(entry.minutes))
-                            .font(.caption2.weight(.semibold))
+                            .font(Theme.ui(10, .semibold))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -82,9 +82,9 @@ struct StatsView: View {
         if !byCourse.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Focus by course — this week")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Theme.ui(15, .semibold))
                 Text("Sessions started from a task count toward its course.")
-                    .font(.caption)
+                    .font(Theme.ui(10))
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 8)
                 Chart(byCourse.prefix(6), id: \.course) { entry in
@@ -97,7 +97,7 @@ struct StatsView: View {
                     .clipShape(UnevenRoundedRectangle(bottomTrailingRadius: 4, topTrailingRadius: 4))
                     .annotation(position: .trailing) {
                         Text(minutesLabel(entry.minutes))
-                            .font(.caption.weight(.medium))
+                            .font(Theme.ui(10, .medium))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -138,11 +138,11 @@ private struct StatTile: View {
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(softTint)
                     .frame(width: 42, height: 42)
                 Image(systemName: icon)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(Theme.ui(17, .semibold))
                     .foregroundStyle(tint)
             }
             VStack(alignment: .leading, spacing: 1) {
@@ -150,7 +150,7 @@ private struct StatTile: View {
                     .font(Theme.number(26))
                     .monospacedDigit()
                 Text(label)
-                    .font(.caption.weight(.medium))
+                    .font(Theme.ui(10, .medium))
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)

@@ -76,19 +76,18 @@ struct MainView: View {
     private var logo: some View {
         HStack(spacing: 10) {
             ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Theme.accentGradient)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Theme.accentFill)
                     .frame(width: 34, height: 34)
-                    .shadow(color: Theme.accent.opacity(0.4), radius: 8, y: 3)
                 Image(systemName: "shield.lefthalf.filled")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(Theme.ui(16, .semibold))
                     .foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 0) {
                 Text("StudyBlock")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(Theme.ui(16, .semibold))
                 Text(blocker.isBlocking ? "Shields up" : "Shields down")
-                    .font(.caption2.weight(.medium))
+                    .font(Theme.ui(10, .medium))
                     .foregroundStyle(blocker.isBlocking ? Theme.success : .secondary)
             }
         }
@@ -121,10 +120,10 @@ struct MainView: View {
                         .stroke(Theme.accentSoft, lineWidth: 3.5)
                     Circle()
                         .trim(from: 0, to: timer.progress)
-                        .stroke(Theme.accentGradient, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+                        .stroke(Theme.accentFill, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                     Image(systemName: timer.isLockedSession ? "lock.fill" : "timer")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(Theme.ui(10, .semibold))
                         .foregroundStyle(Theme.accent)
                 }
                 .frame(width: 30, height: 30)
@@ -135,25 +134,25 @@ struct MainView: View {
                         .font(Theme.number(15, weight: .semibold))
                         .monospacedDigit()
                     Text(timer.currentTaskTitle ?? "Focus session")
-                        .font(.caption2)
+                        .font(Theme.ui(10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
             .padding(11)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
         } else if stats.currentStreak > 0 {
             HStack(spacing: 8) {
                 Image(systemName: "flame.fill")
                     .foregroundStyle(Theme.amber)
                 Text("\(stats.currentStreak)-day streak")
-                    .font(.caption.weight(.semibold))
+                    .font(Theme.ui(10, .semibold))
                 Spacer(minLength: 0)
             }
             .padding(11)
-            .background(Theme.amberSoft, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .background(Theme.amberSoft, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
     }
 
@@ -192,29 +191,29 @@ private struct SidebarItem: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: section.icon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(Theme.ui(14, .semibold))
                     .foregroundStyle(isSelected ? Theme.accent : .secondary)
                     .frame(width: 22)
                 Text(section.rawValue)
-                    .font(.system(size: 13.5, weight: isSelected ? .semibold : .medium))
+                    .font(Theme.ui(13.5, isSelected ? .semibold : .medium))
                     .foregroundStyle(isSelected ? .primary : .secondary)
                 Spacer(minLength: 0)
                 if let badge {
                     Text(badge)
-                        .font(.caption2.weight(.bold))
+                        .font(Theme.ui(10, .semibold))
                         .foregroundStyle(isSelected ? Theme.accent : .secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background((isSelected ? Theme.accentSoft : Theme.surfaceLow), in: Capsule())
+                        .background((isSelected ? Theme.accentSoft : Theme.surfaceLow), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
                 }
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(isSelected ? Theme.accentSoft : (hovering ? Theme.surfaceLow.opacity(0.7) : .clear))
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
         .animation(.easeOut(duration: 0.12), value: hovering)

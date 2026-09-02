@@ -4,16 +4,15 @@ struct QuickAddResult: Equatable {
     var title: String
     var course: String?
     var dueDate: Date?
-    var priority: TaskPriority = .none
 }
 
 /// Parses TickTick-style quick-add input:
-///   "p.142 problems #math friday !!"
-/// → title "p.142 problems", course "math", due next Friday, priority medium.
+///   "p.142 problems #math friday"
+/// → title "p.142 problems", course "math", due next Friday.
 ///
-/// `#word` sets the course, a standalone !/!!/!!! sets priority, and any
-/// natural-language date NSDataDetector finds ("tomorrow", "friday",
-/// "jun 12") becomes the due date and is removed from the title.
+/// `#word` sets the course, and any natural-language date NSDataDetector
+/// finds ("tomorrow", "friday", "jun 12") becomes the due date and is removed
+/// from the title.
 enum QuickAddParser {
     static func parse(_ input: String) -> QuickAddResult {
         let original = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -23,15 +22,6 @@ enum QuickAddParser {
         if let courseRange = working.range(of: "#[A-Za-z0-9_-]+", options: .regularExpression) {
             result.course = String(working[courseRange].dropFirst())
             working.removeSubrange(courseRange)
-        }
-
-        if let bangRange = working.range(of: "(?<=\\s|^)!{1,3}(?=\\s|$)", options: .regularExpression) {
-            switch working[bangRange].count {
-            case 1: result.priority = .low
-            case 2: result.priority = .medium
-            default: result.priority = .high
-            }
-            working.removeSubrange(bangRange)
         }
 
         if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) {

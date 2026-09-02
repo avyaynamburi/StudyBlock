@@ -97,38 +97,38 @@ struct UnlockChallengeSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 Label("Unlock Early", systemImage: "lock.open.fill")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(Theme.ui(16, .semibold))
                 Text("Type the passage below exactly, start to finish, to end the lock now. Pasting is disabled on purpose — this is meant to slow you down, not speed you up.")
-                    .font(.callout)
+                    .font(Theme.ui(12))
                     .foregroundStyle(.secondary)
             }
 
             Text(challenge)
-                .font(.system(.callout, design: .monospaced))
+                .font(Theme.mono(12))
                 .foregroundStyle(.secondary)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
+                .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
 
             NoPasteTextField(text: $typed)
                 .frame(height: 74)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .strokeBorder(hasMismatch ? Theme.danger : (isMatch ? Theme.success : Theme.stroke),
                                   lineWidth: hasMismatch || isMatch ? 1.5 : 1))
 
             if hasMismatch {
                 Label("Doesn't match — check for typos.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .font(Theme.ui(10))
                     .foregroundStyle(Theme.danger)
             } else if let error = model.lastError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .font(Theme.ui(10))
                     .foregroundStyle(Theme.danger)
             } else {
                 Text("\(typed.count) / \(challenge.count) characters")
-                    .font(.caption)
+                    .font(Theme.ui(10))
                     .foregroundStyle(.tertiary)
             }
 

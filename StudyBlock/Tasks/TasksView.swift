@@ -10,9 +10,7 @@ struct TasksView: View {
     @State private var quickAddText = ""
     @State private var quickAddCourse: String?
     @State private var courseFilter: String?
-    @State private var editingTask: TodoItem?
-    @State private var editingRecurringTask: TodoItem?
-    @State private var showingRecurringSheet = false
+    @State private var editorTarget: EditorTarget?
     @State private var timerPromptTask: TodoItem?
     @State private var confettiTrigger = 0
     @State private var csvMessage: CSVMessage?
@@ -24,6 +22,15 @@ struct TasksView: View {
         let id = UUID()
         let title: String
         let detail: String
+    }
+
+    /// What the task editor is open on — an existing card, or a blank draft
+    /// for a new one. One sheet covers both, so this is the only thing that
+    /// distinguishes them.
+    private struct EditorTarget: Identifiable {
+        let task: TodoItem
+        var isNew = false
+        var id: UUID { task.id }
     }
 
     var body: some View {
@@ -45,53 +52,18 @@ struct TasksView: View {
         }
         .overlay { ScreenConfettiOverlay(trigger: confettiTrigger) }
         .onAppear { store.recomputeAutoColumns() }
-        .sheet(item: $editingTask) { task in
-            TaskEditSheet(task: task, courses: store.courses,
-                          seriesPendingCount: task.seriesID.map { store.pendingCount(inSeries: $0) } ?? 0) { updated in
-                store.update(updated)
-            } onDelete: {
-                store.delete(task)
-            } onDeleteSeries: {
-                store.deleteSeries(containing: task)
-            } onEditSeries: {
-                if let seriesID = task.seriesID, let template = store.seriesTemplate(for: seriesID) {
-                    editingRecurringTask = template
-                }
-            } courseColor: { store.color(for: $0) }
-            onCreateCategory: { name, hue in store.setHue(hue, for: name) }
-        }
-        .sheet(isPresented: $showingRecurringSheet) {
-            RecurringTaskSheet(courses: store.courses) { plan in
-                let created = store.addRecurring(title: plan.title, course: plan.course,
-                                                 dueDate: plan.dueDate, priority: plan.priority,
-                                                 repeatRule: plan.repeatRule,
-                                                 repeatWeekdays: plan.weekdays,
-                                                 repeatInterval: plan.interval,
-                                                 seriesEndDate: plan.endDate)
-                csvMessage = CSVMessage(
-                    title: "Created \(created) task\(created == 1 ? "" : "s")",
-                    detail: created == 0
-                        ? "That date range doesn\u{2019}t contain any occurrences — check the start and end dates."
-                        : "Each one is its own task you can complete, edit, or drag independently.")
-            } courseColor: { store.color(for: $0) }
-            onCreateCategory: { name, hue in store.setHue(hue, for: name) }
-        }
-        .sheet(item: $editingRecurringTask) { task in
-            RecurringTaskSheet(courses: store.courses, existing: task,
-                               pendingCount: task.seriesID.map { store.pendingCount(inSeries: $0) } ?? 0) { plan in
-                guard let seriesID = task.seriesID else { return }
-                store.updateSeries(seriesID: seriesID, title: plan.title, course: plan.course,
-                                   dueDate: plan.dueDate, priority: plan.priority,
-                                   repeatRule: plan.repeatRule, repeatWeekdays: plan.weekdays,
-                                   repeatInterval: plan.interval, seriesEndDate: plan.endDate)
-            } onDelete: {
-                if let seriesID = task.seriesID {
-                    store.deleteSeries(seriesID)
-                } else {
-                    store.delete(task)
-                }
-            } courseColor: { store.color(for: $0) }
-            onCreateCategory: { name, hue in store.setHue(hue, for: name) }
+        .sheet(item: $editorTarget) { target in
+            TaskEditSheet(task: target.task, isNew: target.isNew, courses: store.courses,
+                          seriesPendingCount: target.task.seriesID
+                              .map { store.pendingCount(inSeries: $0) } ?? 0,
+                          seriesStart: target.task.seriesID
+                              .flatMap { store.seriesTemplate(for: $0)?.dueDate },
+                          onSave: { plan in save(plan, to: target) },
+                          onDelete: target.isNew ? nil : { store.delete(target.task) },
+                          onDeleteSeries: target.task.seriesID == nil || target.isNew
+                              ? nil : { store.deleteSeries(containing: target.task) },
+                          courseColor: { store.color(for: $0) },
+                          onCreateCategory: { name, hue in store.setHue(hue, for: name) })
         }
         .sheet(item: $timerPromptTask) { task in
             StudyTimerPromptSheet(task: task, defaultMinutes: timer.defaultMinutes) { minutes, locked in
@@ -120,16 +92,16 @@ struct TasksView: View {
     private var quickAddBar: some View {
         HStack(spacing: 10) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Theme.accentGradient)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Theme.accentFill)
                     .frame(width: 26, height: 26)
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(Theme.ui(12, .semibold))
                     .foregroundStyle(.white)
             }
             TextField("Add a task — try: essay friday #history !!", text: $quickAddText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 14))
+                .font(Theme.ui(14))
                 .focused($quickAddFocused)
                 .onSubmit {
                     // One box, two languages: a pasted spreadsheet row goes
@@ -148,25 +120,23 @@ struct TasksView: View {
                                   onCreateCategory: { name, hue in store.setHue(hue, for: name) })
             Button(action: pasteTasksFromClipboard) {
                 Image(systemName: "doc.on.clipboard")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.ui(11, .semibold))
             }
             .buttonStyle(SoftPillButtonStyle())
             .keyboardShortcut("v", modifiers: [.command, .shift])
             .help("Paste tasks from CSV on the clipboard (\u{2318}\u{21E7}V) — one row or many, "
                   + "with or without a header line")
-            Button {
-                showingRecurringSheet = true
-            } label: {
-                Label("Recurring", systemImage: "calendar.badge.clock")
+            Button(action: openNewTaskEditor) {
+                Label("Details", systemImage: "slider.horizontal.3")
             }
             .buttonStyle(SoftPillButtonStyle())
+            .help("Open the full editor \u{2014} due date, time, notes, category, and repeats")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .strokeBorder(quickAddFocused ? Theme.accent.opacity(0.55) : Theme.stroke, lineWidth: 1))
-        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
         .animation(.easeOut(duration: 0.15), value: quickAddFocused)
     }
 
@@ -203,10 +173,77 @@ struct TasksView: View {
     }
 
     /// Every card on the board is a real task — including each copy of a
-    /// recurring one — so a click always opens the plain editor. That editor
-    /// offers a way through to the whole series when the task belongs to one.
+    /// recurring one — so a click always opens the same editor. It asks there
+    /// whether an edit lands on the one card or the whole series.
     private func openEditor(for task: TodoItem) {
-        editingTask = task
+        editorTarget = EditorTarget(task: task)
+    }
+
+    /// Opens the editor on a blank task, seeded with whatever is already in
+    /// the quick-add box — so "I started typing and need a due date" carries
+    /// straight over instead of being retyped.
+    private func openNewTaskEditor() {
+        let typed = quickAddText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = typed.isEmpty ? nil : QuickAddParser.parse(typed)
+        let draft = TodoItem(title: parsed?.title ?? "",
+                             course: parsed?.course ?? quickAddCourse,
+                             dueDate: parsed?.dueDate)
+        editorTarget = EditorTarget(task: draft, isNew: true)
+    }
+
+    /// Applies what the editor handed back: a new task (or whole series), a
+    /// rewrite of an existing series, or an edit to one card.
+    private func save(_ plan: TaskPlan, to target: EditorTarget) {
+        if target.isNew {
+            let created = store.add(title: plan.title, notes: plan.notes, course: plan.course,
+                                    dueDate: plan.dueDate, repeatRule: plan.repeatRule,
+                                    repeatWeekdays: plan.weekdays, repeatInterval: plan.interval,
+                                    seriesEndDate: plan.endDate)
+            quickAddText = ""
+            quickAddCourse = nil
+            report(created: created, repeating: plan.repeatRule != .none)
+            return
+        }
+
+        if plan.appliesToSeries, let seriesID = target.task.seriesID {
+            store.updateSeries(seriesID: seriesID, title: plan.title, notes: plan.notes,
+                               course: plan.course, dueDate: plan.dueDate,
+                               repeatRule: plan.repeatRule, repeatWeekdays: plan.weekdays,
+                               repeatInterval: plan.interval, seriesEndDate: plan.endDate)
+            return
+        }
+
+        var updated = target.task
+        updated.title = plan.title
+        updated.notes = plan.notes
+        updated.course = plan.course
+        updated.dueDate = plan.dueDate
+        updated.repeatRule = plan.repeatRule
+        updated.repeatWeekdays = plan.weekdays
+        updated.repeatInterval = plan.interval
+        updated.seriesEndDate = plan.endDate
+        let created = store.update(updated)
+        // Only worth reporting when a single card just became a whole run.
+        if target.task.seriesID == nil, plan.repeatRule != .none {
+            report(created: created, repeating: true)
+        }
+    }
+
+    /// Turning one line into a hundred cards is a big change to the board, so
+    /// say so rather than leaving the user to notice. A single plain task
+    /// needs no announcement.
+    private func report(created: Int, repeating: Bool) {
+        guard repeating else { return }
+        if created == 0 {
+            csvMessage = CSVMessage(
+                title: "Nothing created",
+                detail: "That date range doesn\u{2019}t contain any occurrences \u{2014} "
+                    + "check the start and end dates.")
+        } else {
+            csvMessage = CSVMessage(
+                title: "Created \(created) task\(created == 1 ? "" : "s")",
+                detail: "Each one is its own task you can complete, edit, or drag independently.")
+        }
     }
 
     private func handleToggle(_ task: TodoItem) {
@@ -227,11 +264,19 @@ struct TasksView: View {
     }
 
     private func handleReorder(id: UUID, before targetID: UUID) {
-        let wasCompleted = store.items.first(where: { $0.id == id })?.isCompleted ?? false
+        let before = store.items.first(where: { $0.id == id })
         store.reorder(id, before: targetID)
-        let isCompletedNow = store.items.first(where: { $0.id == id })?.isCompleted ?? false
-        if isCompletedNow, !wasCompleted {
+        guard let after = store.items.first(where: { $0.id == id }) else { return }
+
+        if after.isCompleted, !(before?.isCompleted ?? false) {
             confettiTrigger += 1
+        }
+        // Dropping onto a card inside Currently Doing lands the task there
+        // just as surely as dropping on the column's empty space, and has to
+        // prompt the same way. Only the empty-space route did, so the prompt
+        // vanished as soon as that column had anything in it.
+        if after.column == .doing, before?.column != .doing, !timer.isRunning {
+            timerPromptTask = after
         }
     }
 
@@ -243,7 +288,7 @@ struct TasksView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "tablecells")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.ui(11, .semibold))
                 Text("CSV")
             }
         }
@@ -355,7 +400,7 @@ struct TasksView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "line.3.horizontal.decrease")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.ui(11, .semibold))
                 Text(courseFilter ?? "All Courses")
             }
         }
@@ -388,17 +433,17 @@ private struct CSVSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
                 Image(systemName: headerIcon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(Theme.ui(14, .semibold))
                     .foregroundStyle(Theme.accent)
                 Text(headerTitle)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(Theme.ui(16, .semibold))
                 Spacer(minLength: 0)
                 if page != .actions {
                     Button {
                         withAnimation(.easeOut(duration: 0.15)) { page = .actions }
                     } label: {
                         Label("Back", systemImage: "chevron.left")
-                            .font(.caption.weight(.medium))
+                            .font(Theme.ui(10, .medium))
                     }
                     .buttonStyle(SoftPillButtonStyle())
                 }
@@ -419,7 +464,7 @@ private struct CSVSheet: View {
                 if page == .actions {
                     Button("Save Blank Template…") { run(onTemplate) }
                         .buttonStyle(.plain)
-                        .font(.caption)
+                        .font(Theme.ui(10))
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
@@ -494,18 +539,18 @@ private struct CSVSheet: View {
     private var pastePage: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Paste the AI\u{2019}s whole reply — you don\u{2019}t need to clean it up first. StudyBlock finds the header row, converts a markdown table if it wrote one, and stops at the commentary underneath. A snippet with no header line works too: the columns are read in the standard order, so a bare row or a plain list of task names both import.")
-                .font(.callout)
+                .font(Theme.ui(12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $pastedText)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Theme.mono(11))
                     .scrollContentBackground(.hidden)
                     .padding(6)
                 if pastedText.isEmpty {
                     Text("title,category,color,due_date,…")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(Theme.mono(11))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 14)
@@ -513,8 +558,8 @@ private struct CSVSheet: View {
                 }
             }
             .frame(height: 210)
-            .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(Theme.stroke, lineWidth: 1))
 
             HStack {
@@ -527,7 +572,7 @@ private struct CSVSheet: View {
                 if !pastedText.isEmpty {
                     Button("Clear") { pastedText = "" }
                         .buttonStyle(.plain)
-                        .font(.caption)
+                        .font(Theme.ui(10))
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
@@ -540,25 +585,25 @@ private struct CSVSheet: View {
     private var promptPage: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Copy this, paste it into a chat with any AI, then list your assignments in plain English — \u{201C}discussion post every Tuesday at 11:59pm for History.\u{201D} Paste its reply back into \u{201C}Paste from a chat\u{201D}, or save it as a .csv and import it.")
-                .font(.callout)
+                .font(Theme.ui(12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Label(promptHint, systemImage: "questionmark.bubble")
-                .font(.caption)
+                .font(Theme.ui(10))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             ScrollView {
                 Text(prompt)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Theme.mono(11))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
             }
             .frame(height: 210)
-            .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(Theme.stroke, lineWidth: 1))
 
             Button {
@@ -598,19 +643,19 @@ private struct CSVSheet: View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .fill(Theme.accentSoft)
                         .frame(width: 34, height: 34)
                     Image(systemName: icon)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(Theme.ui(14, .semibold))
                         .foregroundStyle(Theme.accent)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(Theme.ui(14, .semibold))
                         .foregroundStyle(.primary)
                     Text(subtitle)
-                        .font(.caption)
+                        .font(Theme.ui(10))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
@@ -619,10 +664,10 @@ private struct CSVSheet: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(Theme.stroke, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -647,11 +692,11 @@ private struct CompletedCounterPill: View {
             Image(systemName: "checkmark.seal.fill")
                 .foregroundStyle(Theme.success)
             Text("\(count) completed")
-                .font(.callout.weight(.semibold))
+                .font(Theme.ui(12, .semibold))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Theme.successSoft, in: Capsule())
+        .background(Theme.successSoft, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
         .scaleEffect(bump ? 1.15 : 1)
         .animation(.spring(response: 0.3, dampingFraction: 0.5), value: bump)
         .onAppear { previousCount = count }
@@ -686,15 +731,15 @@ private struct BoardColumn: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 7) {
                 Image(systemName: column.icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.ui(11, .semibold))
                     .foregroundStyle(Theme.accent)
                 Text(column.rawValue)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(Theme.ui(12, .semibold))
                     .textCase(.uppercase)
                     .kerning(0.4)
                     .lineLimit(1)
                 Text("\(count)")
-                    .font(.caption2.weight(.semibold))
+                    .font(Theme.ui(10, .semibold))
                     .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
             }
@@ -716,7 +761,7 @@ private struct BoardColumn: View {
                     }
                     if tasks.isEmpty {
                         Text(emptyMessage)
-                            .font(.caption)
+                            .font(Theme.ui(10))
                             .foregroundStyle(.tertiary)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
@@ -772,45 +817,50 @@ private struct TaskCard: View {
                     ZStack {
                         Circle()
                             .strokeBorder(task.isCompleted ? .clear : (hovering ? Theme.accent : Color.secondary.opacity(0.45)), lineWidth: 1.5)
-                            .background(Circle().fill(task.isCompleted ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(.clear)))
+                            .background(Circle().fill(task.isCompleted ? Theme.accentFill : Color.clear))
                             .frame(width: 18, height: 18)
                         if task.isCompleted {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(Theme.ui(9, .semibold))
                                 .foregroundStyle(.white)
                         }
                     }
+                    // The whole disc has to be clickable. An unchecked box is
+                    // a stroked ring over a *clear* fill, and a clear fill
+                    // takes no clicks — so without this the only hittable part
+                    // is the 1.5pt ring, and the box appears to stop working
+                    // the moment it's unchecked.
+                    .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .animation(.spring(response: 0.25, dampingFraction: 0.7), value: task.isCompleted)
                 .help(task.isCompleted ? "Mark incomplete" : "Mark complete")
 
-                // Only the title/notes text (no buttons) opens the editor and
-                // acts as the drag handle — keeping the checkbox and focus
-                // button out from under `.draggable` is what lets them
-                // actually receive their taps instead of starting a drag.
+                // Clicking the title or the meta row opens the editor. Those
+                // are child tap gestures under the card's own drag, which is
+                // what keeps the two from fighting: a tap needs no movement,
+                // a drag needs some.
                 VStack(alignment: .leading, spacing: 2) {
                     Text(task.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(Theme.ui(13, .medium))
                         .strikethrough(task.isCompleted)
                         .foregroundStyle(task.isCompleted ? .secondary : .primary)
                         .lineLimit(2)
                     if !task.notes.isEmpty {
                         Text(task.notes)
-                            .font(.caption2)
+                            .font(Theme.ui(10))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { onSelect?() }
-                .draggable(task.id.uuidString) { dragPreview }
 
                 Spacer(minLength: 0)
                 if let onFocus, showFocusButton, hovering {
                     Button(action: onFocus) {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(Theme.ui(10, .semibold))
                     }
                     .buttonStyle(IconButtonStyle(tint: Theme.accent))
                     .help("Start a focus session on this task")
@@ -827,7 +877,7 @@ private struct TaskCard: View {
                         }
                     } label: {
                         Image(systemName: "arrow.right.circle")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(Theme.ui(11, .semibold))
                             .foregroundStyle(.secondary)
                     }
                     .menuStyle(.borderlessButton)
@@ -841,7 +891,7 @@ private struct TaskCard: View {
             HStack(spacing: 6) {
                 if task.repeatRule != .none {
                     Image(systemName: "repeat")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(Theme.ui(9, .semibold))
                         .foregroundStyle(.tertiary)
                         .help(task.repeatRule.intervalLabel(task.repeatInterval))
                 }
@@ -850,28 +900,30 @@ private struct TaskCard: View {
                 }
                 if let due = task.dueDate {
                     Text(Self.dueLabel(for: due))
-                        .font(.caption2.weight(.medium))
+                        .font(Theme.ui(10, .medium))
                         .foregroundStyle(task.isOverdue ? Theme.danger : .secondary)
-                }
-                if task.priority != .none {
-                    Image(systemName: "flag.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(priorityColor)
                 }
                 Spacer(minLength: 0)
             }
             .padding(.leading, 27)
             .contentShape(Rectangle())
             .onTapGesture { onSelect?() }
-            .draggable(task.id.uuidString) { dragPreview }
         }
         .padding(10)
-        .background(cardBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+        .background(cardBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .strokeBorder(borderColor, lineWidth: borderWidth))
-        // Where the card will land, drawn as the gap it will drop into: the
-        // target slides down to open a space and a line marks the seam.
-        .offset(y: isDropTargeted ? 5 : 0)
+        // Pick the card up from anywhere on it. This used to hang off the two
+        // inner text views, which left the checkbox column, the spacer, the
+        // hover-button strip and all the padding as dead zones — most of the
+        // card's area — so grabbing it missed about as often as it hit.
+        // Buttons inside still win their own clicks: a drag only begins once
+        // the pointer moves.
+        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .draggable(task.id.uuidString) { dragPreview }
+        // Where the card will land. Drawn as a line only — the target used to
+        // slide down 5pt to open a gap, which moved it out from under the
+        // pointer, cleared `isTargeted`, moved it back, and oscillated.
         .overlay(alignment: .top) {
             if isDropTargeted {
                 Capsule()
@@ -929,14 +981,14 @@ private struct TaskCard: View {
                     .strokeBorder(Color.secondary.opacity(0.45), lineWidth: 1.5)
                     .frame(width: 18, height: 18)
                 Text(task.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Theme.ui(13, .medium))
                     .lineLimit(2)
                 Spacer(minLength: 0)
             }
             HStack(spacing: 6) {
                 if task.repeatRule != .none {
                     Image(systemName: "repeat")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(Theme.ui(9, .semibold))
                         .foregroundStyle(.tertiary)
                 }
                 if let course = task.course {
@@ -944,7 +996,7 @@ private struct TaskCard: View {
                 }
                 if let due = task.dueDate {
                     Text(Self.dueLabel(for: due))
-                        .font(.caption2.weight(.medium))
+                        .font(Theme.ui(10, .medium))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -953,20 +1005,12 @@ private struct TaskCard: View {
         }
         .padding(10)
         .frame(width: 226, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .strokeBorder(Theme.accent.opacity(0.65), lineWidth: 1.5))
-        .shadow(color: .black.opacity(0.30), radius: 14, y: 7)
+        .shadow(color: .black.opacity(0.22), radius: 10, y: 5)
         .rotationEffect(.degrees(-1.5))
         .padding(16)
-    }
-
-    private var priorityColor: Color {
-        switch task.priority {
-        case .high: return Theme.danger
-        case .medium: return Theme.amber
-        default: return Theme.accent
-        }
     }
 
     private var cardBackground: AnyShapeStyle {
@@ -1169,7 +1213,7 @@ private struct CategoryPickerButton: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "tag")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.ui(11, .semibold))
                 Text(selection ?? "Category")
             }
         }
@@ -1198,17 +1242,17 @@ private struct NewCategorySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Category")
-                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .font(Theme.ui(15, .semibold))
 
             TextField("Category name", text: $name)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-                .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
+                .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Color").font(.caption).foregroundStyle(.secondary)
+                Text("Color").font(Theme.ui(10)).foregroundStyle(.secondary)
                 HStack(spacing: 10) {
                     ForEach(Theme.categoryHueSteps, id: \.self) { step in
                         Circle()
@@ -1217,7 +1261,7 @@ private struct NewCategorySheet: View {
                             .overlay(Circle().strokeBorder(Theme.stroke, lineWidth: 1))
                             .overlay(
                                 Image(systemName: "checkmark")
-                                    .font(.system(size: 10, weight: .bold))
+                                    .font(Theme.ui(10, .semibold))
                                     .foregroundStyle(Theme.categoryInk(hue: step))
                                     .opacity(hue == step ? 1 : 0)
                             )
@@ -1250,7 +1294,7 @@ private struct NewCategorySheet: View {
 
 // MARK: - Weekday picker
 
-/// Shared by the recurring-task sheet and the block-schedule editor.
+/// Shared by the task editor and the block-schedule editor.
 struct WeekdayPicker: View {
     @Binding var selection: Set<Int>
     private static let symbols = ["S", "M", "T", "W", "T", "F", "S"]
@@ -1263,10 +1307,10 @@ struct WeekdayPicker: View {
                     if isOn { selection.remove(weekday) } else { selection.insert(weekday) }
                 } label: {
                     Text(Self.symbols[weekday - 1])
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .font(Theme.ui(12, .semibold))
                         .frame(width: 26, height: 26)
                         .foregroundStyle(isOn ? .white : .secondary)
-                        .background(isOn ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Theme.surfaceLow), in: Circle())
+                        .background(isOn ? Theme.accentFill : Theme.surfaceLow, in: Circle())
                         .overlay(Circle().strokeBorder(isOn ? .clear : Theme.stroke, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
@@ -1285,6 +1329,19 @@ private struct StudyTimerPromptSheet: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("lockSessions") private var lockSessions = false
     @State private var selectedMinutes: Int
+    @State private var customText = ""
+    @FocusState private var customFocused: Bool
+
+    /// What Start will actually use: whatever is typed in the custom box if
+    /// it's a sane number, otherwise the chosen preset. Nil means the box has
+    /// something unusable in it, which disables Start rather than silently
+    /// falling back to a duration the user didn't ask for.
+    private var minutes: Int? {
+        let typed = customText.trimmingCharacters(in: .whitespaces)
+        guard !typed.isEmpty else { return selectedMinutes }
+        guard let value = Int(typed), (1...600).contains(value) else { return nil }
+        return value
+    }
 
     init(task: TodoItem, defaultMinutes: Int, onStart: @escaping (Int, Bool) -> Void) {
         self.task = task
@@ -1299,29 +1356,51 @@ private struct StudyTimerPromptSheet: View {
                 ZStack {
                     Circle().fill(Theme.accentSoft).frame(width: 52, height: 52)
                     Image(systemName: "bolt.fill")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(Theme.ui(20, .semibold))
                         .foregroundStyle(Theme.accent)
                 }
                 Text("Start a study timer?")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(Theme.ui(17, .semibold))
                 Text("\"\(task.title)\" just moved to Currently Doing.")
-                    .font(.callout)
+                    .font(Theme.ui(12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 20)
             }
             .padding(.top, 24)
 
-            HStack(spacing: 10) {
-                ForEach(FocusTimerController.presetMinutes, id: \.self) { minutes in
-                    Button("\(minutes) min") { selectedMinutes = minutes }
-                        .buttonStyle(SoftPillButtonStyle(tint: selectedMinutes == minutes ? Theme.accent : nil))
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    ForEach(FocusTimerController.presetMinutes, id: \.self) { preset in
+                        Button("\(preset) min") {
+                            selectedMinutes = preset
+                            customText = ""
+                            customFocused = false
+                        }
+                        .buttonStyle(SoftPillButtonStyle(
+                            tint: customText.isEmpty && selectedMinutes == preset ? Theme.accent : nil))
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Text("or").font(Theme.ui(12)).foregroundStyle(.secondary)
+                    TextField("custom", text: $customText)
+                        .textFieldStyle(.plain)
+                        .multilineTextAlignment(.center)
+                        .frame(width: 54)
+                        .padding(.vertical, 5)
+                        .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .strokeBorder(minutes == nil ? Theme.danger : Theme.stroke, lineWidth: 1))
+                        .focused($customFocused)
+                        .onSubmit { if minutes != nil { start() } }
+                    Text("minutes").font(Theme.ui(12)).foregroundStyle(.secondary)
                 }
             }
 
             Toggle(isOn: $lockSessions) {
                 Text("Lock session — no giving up until time is up")
-                    .font(.callout)
+                    .font(Theme.ui(12))
             }
             .toggleStyle(CheckToggleStyle())
             .padding(.horizontal, 24)
@@ -1331,14 +1410,12 @@ private struct StudyTimerPromptSheet: View {
                     .buttonStyle(SoftPillButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button {
-                    onStart(selectedMinutes, lockSessions)
-                    dismiss()
-                } label: {
+                Button(action: start) {
                     Label("Start Timer", systemImage: "play.fill")
                 }
                 .buttonStyle(ProminentPillButtonStyle())
                 .keyboardShortcut(.defaultAction)
+                .disabled(minutes == nil)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
@@ -1346,97 +1423,164 @@ private struct StudyTimerPromptSheet: View {
         .frame(width: 360)
         .background(Theme.bg)
     }
+
+    private func start() {
+        guard let minutes else { return }
+        onStart(minutes, lockSessions)
+        dismiss()
+    }
 }
 
-// MARK: - Recurring task sheet
+// MARK: - Task editor
 
-/// What the recurring sheet hands back: a complete description of a series,
-/// which the store turns into one real task per occurrence.
-struct SeriesPlan {
+/// Everything the task editor hands back. A plain task and a whole recurring
+/// series are the same form now — the repeat rule is just another field on it
+/// — so one type describes both.
+struct TaskPlan {
     var title: String
+    var notes: String
     var course: String?
-    var dueDate: Date
-    var priority: TaskPriority
-    var repeatRule: RepeatRule
-    var weekdays: Set<Int>
+    /// nil for a task with no due date. A repeating task always has one: it's
+    /// where the series starts counting from.
+    var dueDate: Date?
+    var repeatRule: RepeatRule = .none
+    /// 1 = Sunday … 7 = Saturday. Only meaningful with `.weekly`.
+    var weekdays: Set<Int> = []
     /// Periods between occurrences — 2 with `.weekly` is "every other week".
-    var interval: Int
+    var interval: Int = 1
     /// Last day the series runs, or nil for "repeats indefinitely".
     var endDate: Date?
+    /// For a task already in a series: whether Save rewrites every occurrence
+    /// still to do, or only the one that was opened.
+    var appliesToSeries = false
 }
 
-struct RecurringTaskSheet: View {
+/// The one place a task is written: title, notes, category, due date and —
+/// behind a single "Repeats" checkbox — the whole recurring schedule. It
+/// creates tasks too (`isNew`), so there's one form to learn rather than a
+/// separate sheet per kind of task, and a plain task can be given a due date
+/// or turned into a repeating one without leaving it.
+struct TaskEditSheet: View {
+    /// The task being edited, or a blank draft when `isNew`.
+    let task: TodoItem
+    var isNew = false
     let courses: [String]
-    var existing: TodoItem?
-    /// Occurrences of this series still pending, so an edit can say plainly
-    /// how many tasks it is about to replace.
-    var pendingCount: Int = 0
-    let onSave: (SeriesPlan) -> Void
+    /// Occurrences of this task's series still pending, or 0 when it isn't
+    /// part of one. Says plainly how much "All" would rewrite.
+    var seriesPendingCount: Int = 0
+    /// Where "All" rebuilds the series from: its first occurrence still to do,
+    /// which isn't necessarily the card that was opened. Rebuilding from a
+    /// later card would quietly drop the ones before it.
+    var seriesStart: Date?
+    let onSave: (TaskPlan) -> Void
+    /// Absent when creating — there's nothing to delete yet.
     var onDelete: (() -> Void)?
+    /// Deletes the rest of the series alongside this task. Absent for a task
+    /// that isn't part of one, which keeps Delete a plain one-tap delete
+    /// there instead of asking a pointless question.
+    var onDeleteSeries: (() -> Void)?
     var courseColor: (String) -> Color = { _ in Theme.accent }
     var onCreateCategory: (_ name: String, _ hue: Double) -> Void = { _, _ in }
 
     @Environment(\.dismiss) private var dismiss
+
     @State private var title: String
+    @State private var notes: String
     @State private var course: String?
-    @State private var priority: TaskPriority
+    @State private var hasDueDate: Bool
+    @State private var dueDay: Date
+    @State private var hasDueTime: Bool
+    @State private var dueTime: Date
+    @State private var repeats: Bool
     @State private var repeatRule: RepeatRule
     @State private var weekdays: Set<Int>
     @State private var interval: Int
-    @State private var dueDate: Date
-    @State private var hasDueTime: Bool
-    @State private var dueTime: Date
     @State private var hasEndDate: Bool
     @State private var endDate: Date
+    @State private var applyToSeries: Bool
+    @State private var showingDeleteChoice = false
 
-    private static let recurringOptions: [RepeatRule] = [.daily, .weekly, .monthly]
+    /// "Never" is the unchecked checkbox now, so it isn't one of the choices.
+    private static let repeatOptions: [RepeatRule] = [.daily, .weekly, .monthly]
 
-    init(courses: [String], existing: TodoItem? = nil, pendingCount: Int = 0,
-         onSave: @escaping (SeriesPlan) -> Void,
-         onDelete: (() -> Void)? = nil,
+    init(task: TodoItem, isNew: Bool = false, courses: [String], seriesPendingCount: Int = 0,
+         seriesStart: Date? = nil,
+         onSave: @escaping (TaskPlan) -> Void,
+         onDelete: (() -> Void)? = nil, onDeleteSeries: (() -> Void)? = nil,
          courseColor: @escaping (String) -> Color = { _ in Theme.accent },
          onCreateCategory: @escaping (_ name: String, _ hue: Double) -> Void = { _, _ in }) {
+        self.task = task
+        self.isNew = isNew
         self.courses = courses
-        self.existing = existing
-        self.pendingCount = pendingCount
+        self.seriesPendingCount = seriesPendingCount
+        self.seriesStart = seriesStart
         self.onSave = onSave
         self.onDelete = onDelete
+        self.onDeleteSeries = onDeleteSeries
         self.courseColor = courseColor
         self.onCreateCategory = onCreateCategory
 
-        _title = State(initialValue: existing?.title ?? "")
-        _course = State(initialValue: existing?.course)
-        _priority = State(initialValue: existing?.priority ?? .none)
-        _repeatRule = State(initialValue: existing.map { $0.repeatRule == .none ? .weekly : $0.repeatRule } ?? .weekly)
-        _weekdays = State(initialValue: existing?.repeatWeekdays ?? [])
-        _interval = State(initialValue: existing?.repeatInterval ?? 1)
+        _title = State(initialValue: task.title)
+        _notes = State(initialValue: task.notes)
+        _course = State(initialValue: task.course)
 
-        let due = existing?.dueDate ?? Calendar.current.startOfDay(for: .now)
-        _dueDate = State(initialValue: Calendar.current.startOfDay(for: due))
-        let comps = Calendar.current.dateComponents([.hour, .minute], from: due)
-        _hasDueTime = State(initialValue: (comps.hour ?? 0) != 0 || (comps.minute ?? 0) != 0)
-        _dueTime = State(initialValue: due)
+        // Every date control needs *some* value to sit on even while it's
+        // switched off, so an undated task anchors them all on today.
+        let calendar = Calendar.current
+        let anchor = task.dueDate ?? calendar.startOfDay(for: .now)
+        _hasDueDate = State(initialValue: task.dueDate != nil)
+        _dueDay = State(initialValue: calendar.startOfDay(for: anchor))
+        let time = calendar.dateComponents([.hour, .minute], from: anchor)
+        _hasDueTime = State(initialValue: task.dueDate != nil
+                            && ((time.hour ?? 0) != 0 || (time.minute ?? 0) != 0))
+        _dueTime = State(initialValue: anchor)
 
-        _hasEndDate = State(initialValue: existing?.seriesEndDate != nil)
+        _repeats = State(initialValue: task.repeatRule != .none)
+        _repeatRule = State(initialValue: task.repeatRule == .none ? .weekly : task.repeatRule)
+        _weekdays = State(initialValue: task.repeatWeekdays)
+        _interval = State(initialValue: task.repeatInterval)
+        _hasEndDate = State(initialValue: task.seriesEndDate != nil)
         // A sensible first guess for "when does this stop" — about a term out.
-        let defaultEnd = Calendar.current.date(byAdding: .month, value: 4,
-                                               to: Calendar.current.startOfDay(for: due))
-        _endDate = State(initialValue: existing?.seriesEndDate ?? defaultEnd ?? due)
+        let start = calendar.startOfDay(for: anchor)
+        let defaultEnd = calendar.date(byAdding: .month, value: 4, to: start) ?? start
+        _endDate = State(initialValue: task.seriesEndDate ?? defaultEnd)
+        // Least destructive default: an edit touches the card you opened
+        // until you say otherwise.
+        _applyToSeries = State(initialValue: false)
     }
 
-    /// The dates this series would produce with the current settings — drives
-    /// the live "creates N tasks" preview, so the scale is visible before the
-    /// button is pressed rather than after.
+    /// True for a card that's one copy of a live recurring series — the only
+    /// case where "this one, or all of them?" is a real question.
+    private var isSeriesMember: Bool { !isNew && task.isRecurring }
+
+    /// Whether the repeat controls are live. A repeat describes the series as
+    /// a whole, so editing a single occurrence can't reach it.
+    private var canEditRepeat: Bool { !isSeriesMember || applyToSeries }
+
+    /// A finished task has no schedule left to set, so the checkbox only
+    /// appears on one still to do — or on any occurrence of a series, where
+    /// it's what the schedule is read from.
+    private var showsRepeat: Bool { isNew || !task.isCompleted || isSeriesMember }
+
+    private var combinedDueDate: Date? {
+        guard hasDueDate else { return nil }
+        return hasDueTime ? combineDateAndTime(date: dueDay, time: dueTime)
+                          : Calendar.current.startOfDay(for: dueDay)
+    }
+
+    /// The rule as saved. A repeat counts from a start date, so an undated
+    /// task is never a repeating one however the checkbox is left.
+    private var effectiveRule: RepeatRule { repeats && hasDueDate ? repeatRule : .none }
+
+    /// The dates this series would produce as currently configured — drives
+    /// the live "creates N tasks" line, so the scale is visible before Save
+    /// rather than after.
     private var previewDates: [Date] {
-        var template = TodoItem(title: "preview", repeatRule: repeatRule, repeatWeekdays: weekdays)
-        template.seriesEndDate = hasEndDate ? endDate : nil
-        return repeatRule.occurrences(startingAt: combinedDueDate, weekdays: weekdays,
-                                      interval: interval, endDate: template.seriesEndDate,
-                                      limit: RepeatRule.materializedCount(hasEndDate: hasEndDate))
-    }
-
-    private var combinedDueDate: Date {
-        hasDueTime ? combineDateAndTime(date: dueDate, time: dueTime) : dueDate
+        guard effectiveRule != .none, let start = combinedDueDate else { return [] }
+        return effectiveRule.occurrences(startingAt: start, weekdays: weekdays,
+                                         interval: interval,
+                                         endDate: hasEndDate ? endDate : nil,
+                                         limit: RepeatRule.materializedCount(hasEndDate: hasEndDate))
     }
 
     private var previewSummary: String {
@@ -1452,432 +1596,279 @@ struct RecurringTaskSheet: View {
             + "and adds another each time you finish one."
     }
 
+    /// The schedule in one line, for when the repeat controls are read-only.
+    private var scheduleSummary: String {
+        var parts = [repeatRule.intervalLabel(interval).lowercased()]
+        if repeatRule == .weekly, !weekdays.isEmpty {
+            let symbols = Calendar.current.shortWeekdaySymbols
+            parts.append("on " + weekdays.sorted().map { symbols[$0 - 1] }.joined(separator: ", "))
+        }
+        if hasEndDate {
+            parts.append("until " + endDate.formatted(.dateTime.month(.abbreviated).day()))
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private var canSave: Bool {
+        guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        return effectiveRule == .none || !previewDates.isEmpty
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            Text(existing == nil ? "New Recurring Task" : "Edit Recurring Task")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+            Text(isNew ? "New Task" : "Edit Task")
+                .font(Theme.ui(16, .semibold))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 12)
 
+            if isSeriesMember {
+                scopePicker
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
+            }
+
             ScrollView {
                 VStack(spacing: 12) {
-                    VStack(spacing: 0) {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text("Title").font(.callout).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
-                            TextField("Title", text: $title).textFieldStyle(.plain)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-
-                        Divider().overlay(Theme.stroke)
-                        HStack {
-                            Text("Category").font(.callout)
-                            Spacer()
-                            CategoryPickerButton(selection: $course, courses: courses,
-                                                  courseColor: courseColor, onCreateCategory: onCreateCategory)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                    }
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
-
-                    VStack(spacing: 0) {
-                        HStack {
-                            Text("Repeats").font(.callout)
-                            Spacer()
-                            Picker("", selection: $repeatRule) {
-                                ForEach(Self.recurringOptions, id: \.self) { Text($0.label).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .fixedSize()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-
-                        Divider().overlay(Theme.stroke)
-                        HStack {
-                            Text("How often").font(.callout)
-                            Spacer()
-                            Text(repeatRule.intervalLabel(interval))
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                            Stepper("", value: $interval, in: 1...52)
-                                .labelsHidden()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-
-                        if repeatRule == .weekly {
-                            Divider().overlay(Theme.stroke)
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("On these days")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                WeekdayPicker(selection: $weekdays)
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                        }
-
-                        Divider().overlay(Theme.stroke)
-                        HStack {
-                            Text(repeatRule == .monthly ? "Due date" : "Starting").font(.callout)
-                            Spacer()
-                            DatePicker("", selection: $dueDate, displayedComponents: .date).labelsHidden()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-
-                        Divider().overlay(Theme.stroke)
-                        HStack {
-                            Text("Due time").font(.callout)
-                            Spacer()
-                            DatePicker("", selection: $dueTime, displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                                .disabled(!hasDueTime)
-                                .opacity(hasDueTime ? 1 : 0.4)
-                            Toggle("", isOn: $hasDueTime).toggleStyle(GlowToggleStyle()).labelsHidden()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-
-                        Divider().overlay(Theme.stroke)
-                        HStack {
-                            Text("Ends").font(.callout)
-                            Spacer()
-                            DatePicker("", selection: $endDate, in: dueDate..., displayedComponents: .date)
-                                .labelsHidden()
-                                .disabled(!hasEndDate)
-                                .opacity(hasEndDate ? 1 : 0.4)
-                            Toggle("", isOn: $hasEndDate).toggleStyle(GlowToggleStyle()).labelsHidden()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-
-                        Divider().overlay(Theme.stroke)
-                        HStack {
-                            Text("Priority").font(.callout)
-                            Spacer()
-                            Picker("", selection: $priority) {
-                                ForEach(TaskPriority.allCases, id: \.self) { Text($0.label).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .fixedSize()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                    }
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        if repeatRule == .weekly, weekdays.isEmpty {
-                            Text("No days selected — it'll repeat weekly on \(dueDate.formatted(.dateTime.weekday(.wide))).")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Label(previewSummary, systemImage: previewDates.isEmpty
-                              ? "exclamationmark.triangle.fill" : "square.on.square")
-                            .font(.caption)
-                            .foregroundStyle(previewDates.isEmpty ? Theme.danger : .secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if existing != nil, pendingCount > 0 {
-                            Label("Saving replaces the \(pendingCount) task\(pendingCount == 1 ? "" : "s") "
-                                  + "still to do in this series. Completed ones are kept.",
-                                  systemImage: "arrow.triangle.2.circlepath")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    detailsCard
+                    scheduleCard
                 }
                 .padding(.horizontal, 20)
+                .padding(.bottom, 4)
             }
 
-            HStack {
-                if let onDelete {
-                    Button {
-                        onDelete()
-                        dismiss()
-                    } label: {
-                        Label(pendingCount > 1 ? "Delete \(pendingCount) Tasks" : "Delete",
-                              systemImage: "trash")
-                    }
-                    .buttonStyle(SoftPillButtonStyle(tint: Theme.danger))
-                    .help("Removes every occurrence still to do. Completed ones are kept.")
-                }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(SoftPillButtonStyle())
-                    .keyboardShortcut(.cancelAction)
-                Button(existing == nil ? "Add Tasks" : "Save Series") {
-                    onSave(SeriesPlan(title: title, course: course, dueDate: combinedDueDate,
-                                      priority: priority, repeatRule: repeatRule,
-                                      weekdays: weekdays, interval: interval,
-                                      endDate: hasEndDate ? endDate : nil))
-                    dismiss()
-                }
-                .buttonStyle(ProminentPillButtonStyle())
-                .keyboardShortcut(.defaultAction)
-                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || previewDates.isEmpty)
-            }
-            .padding(20)
+            footer
         }
-        .frame(width: 460, height: 580)
+        .frame(width: 460, height: 600)
         .background(Theme.bg)
     }
 
-}
+    // MARK: Scope
 
-/// Merges the calendar date from `date` with the hour/minute from `time`.
-private func combineDateAndTime(date: Date, time: Date) -> Date {
-    let calendar = Calendar.current
-    let dateComponents = calendar.dateComponents([.year, .month, .day], from: date)
-    let timeComponents = calendar.dateComponents([.hour, .minute], from: time)
-    var merged = DateComponents()
-    merged.year = dateComponents.year
-    merged.month = dateComponents.month
-    merged.day = dateComponents.day
-    merged.hour = timeComponents.hour
-    merged.minute = timeComponents.minute
-    return calendar.date(from: merged) ?? date
-}
+    /// The one question the old separate "Edit Series" sheet used to answer by
+    /// existing: does this edit land on the card you opened, or on the whole
+    /// run? Asking it here is what lets a single form cover both.
+    private var scopePicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "repeat").font(Theme.ui(11, .semibold))
+                Text("This task repeats").font(Theme.ui(11, .medium))
+                Spacer(minLength: 0)
+                Picker("", selection: $applyToSeries) {
+                    Text("This one").tag(false)
+                    Text(seriesPendingCount > 1 ? "All \(seriesPendingCount)" : "All").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                // "All" rewrites the run from its first occurrence still to
+                // do. Leaving the date on the card that happened to be opened
+                // would restart the series there and drop everything before it.
+                .onChange(of: applyToSeries) { all in
+                    applyDate(all ? (seriesStart ?? task.dueDate) : task.dueDate)
+                }
+            }
+            .foregroundStyle(Theme.accent)
 
-// MARK: - Edit sheet
-
-struct TaskEditSheet: View {
-    @State var task: TodoItem
-    let courses: [String]
-    /// Occurrences of this task's series still pending, or 0 if it isn't part
-    /// of one. Drives the "edit the whole series" route out of this sheet.
-    var seriesPendingCount: Int = 0
-    let onSave: (TodoItem) -> Void
-    let onDelete: () -> Void
-    /// Deletes the rest of the series alongside this task. Absent for a task
-    /// that isn't part of one, which is what keeps the delete button a plain
-    /// one-tap delete there instead of asking a pointless question.
-    var onDeleteSeries: (() -> Void)?
-    var onEditSeries: (() -> Void)?
-    var courseColor: (String) -> Color = { _ in Theme.accent }
-    var onCreateCategory: (_ name: String, _ hue: Double) -> Void = { _, _ in }
-    @Environment(\.dismiss) private var dismiss
-    @State private var hasDueDate: Bool
-    @State private var hasDueTime: Bool
-    @State private var dueTime: Date
-    @State private var showingDeleteChoice = false
-
-    init(task: TodoItem, courses: [String], seriesPendingCount: Int = 0,
-         onSave: @escaping (TodoItem) -> Void,
-         onDelete: @escaping () -> Void, onDeleteSeries: (() -> Void)? = nil,
-         onEditSeries: (() -> Void)? = nil,
-         courseColor: @escaping (String) -> Color = { _ in Theme.accent },
-         onCreateCategory: @escaping (_ name: String, _ hue: Double) -> Void = { _, _ in }) {
-        _task = State(initialValue: task)
-        self.courses = courses
-        self.seriesPendingCount = seriesPendingCount
-        _hasDueDate = State(initialValue: task.dueDate != nil)
-        let comps = task.dueDate.map { Calendar.current.dateComponents([.hour, .minute], from: $0) }
-        let hasTime = (comps?.hour ?? 0) != 0 || (comps?.minute ?? 0) != 0
-        _hasDueTime = State(initialValue: hasTime)
-        _dueTime = State(initialValue: task.dueDate ?? Date())
-        self.onSave = onSave
-        self.onDelete = onDelete
-        self.onDeleteSeries = onDeleteSeries
-        self.onEditSeries = onEditSeries
-        self.courseColor = courseColor
-        self.onCreateCategory = onCreateCategory
+            Text(applyToSeries
+                 ? "Saving rebuilds every occurrence still to do from the date below. "
+                    + "Ones you\u{2019}ve already completed are kept."
+                 : "Changes apply to this copy only. Switch to All to change the schedule.")
+                .font(Theme.ui(10))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
-    private static let repeatOptions = RepeatRule.allCases
+    // MARK: Fields
 
-    var body: some View {
+    private var detailsCard: some View {
         VStack(spacing: 0) {
-            Text("Edit Task")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-                .padding(.bottom, 12)
-
-            if task.seriesID != nil, let onEditSeries {
-                Button {
-                    onEditSeries()
-                    dismiss()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "repeat")
-                            .font(.system(size: 11, weight: .semibold))
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("One copy of a repeating task — edits here affect only this one")
-                                .font(.caption.weight(.medium))
-                            if seriesPendingCount > 0 {
-                                Text("Edit all \(seriesPendingCount) still to do")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(Theme.accent)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 12)
+            sheetField("Title") {
+                TextField("Title", text: $title).textFieldStyle(.plain)
             }
-
-            ScrollView {
-                VStack(spacing: 12) {
-                    VStack(spacing: 0) {
-                        sheetField("Title") {
-                            TextField("Title", text: $task.title).textFieldStyle(.plain)
-                        }
-                        Divider().overlay(Theme.stroke)
-                        sheetField("Notes") {
-                            TextField("Notes", text: $task.notes, axis: .vertical)
-                                .textFieldStyle(.plain)
-                                .lineLimit(2...4)
-                        }
-                        Divider().overlay(Theme.stroke)
-                        HStack {
-                            Text("Category").font(.callout).foregroundStyle(.secondary)
-                            Spacer()
-                            CategoryPickerButton(selection: $task.course, courses: courses,
-                                                  courseColor: courseColor, onCreateCategory: onCreateCategory)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                    }
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
-
-                    VStack(spacing: 0) {
-                        HStack {
-                            Text("Due date").font(.callout)
-                            Spacer()
-                            Toggle("", isOn: $hasDueDate).toggleStyle(GlowToggleStyle()).labelsHidden()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-
-                        if hasDueDate {
-                            Divider().overlay(Theme.stroke)
-                            HStack {
-                                Text("Due").font(.callout)
-                                Spacer()
-                                DatePicker("", selection: Binding(
-                                    get: { task.dueDate ?? Calendar.current.startOfDay(for: .now) },
-                                    set: { task.dueDate = $0 }
-                                ), displayedComponents: .date)
-                                .labelsHidden()
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-
-                            Divider().overlay(Theme.stroke)
-                            HStack {
-                                Text("Due time").font(.callout)
-                                Spacer()
-                                DatePicker("", selection: $dueTime, displayedComponents: .hourAndMinute)
-                                    .labelsHidden()
-                                    .disabled(!hasDueTime)
-                                    .opacity(hasDueTime ? 1 : 0.4)
-                                Toggle("", isOn: $hasDueTime).toggleStyle(GlowToggleStyle()).labelsHidden()
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-
-                            // Repeat belongs to the series as a whole, so it's
-                            // only editable here for a task that isn't in one
-                            // yet — setting it promotes this task into a series.
-                            if task.seriesID == nil {
-                                Divider().overlay(Theme.stroke)
-                                HStack {
-                                    Text("Repeat").font(.callout)
-                                    Spacer()
-                                    Picker("", selection: $task.repeatRule) {
-                                        ForEach(Self.repeatOptions, id: \.self) { Text($0.label).tag($0) }
-                                    }
-                                    .labelsHidden()
-                                    .fixedSize()
-                                }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-
-                                if task.repeatRule != .none {
-                                    Divider().overlay(Theme.stroke)
-                                    HStack {
-                                        Text("How often").font(.callout)
-                                        Spacer()
-                                        Text(task.repeatRule.intervalLabel(task.repeatInterval))
-                                            .font(.callout)
-                                            .foregroundStyle(.secondary)
-                                            .monospacedDigit()
-                                        Stepper("", value: $task.repeatInterval, in: 1...52)
-                                            .labelsHidden()
-                                    }
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
-                                }
-
-                                if task.repeatRule == .weekly {
-                                    Divider().overlay(Theme.stroke)
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text("On these days")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        WeekdayPicker(selection: $task.repeatWeekdays)
-                                    }
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
-                                }
-
-                                if task.repeatRule != .none {
-                                    Divider().overlay(Theme.stroke)
-                                    Label("Saving creates \(RepeatRule.perpetualCount) copies of this task, "
-                                          + "one per occurrence. Use the Recurring button to set an end date.",
-                                          systemImage: "square.on.square")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 8)
-                                }
-                            }
-                        }
-
-                        Divider().overlay(Theme.stroke)
-                        HStack {
-                            Text("Priority").font(.callout)
-                            Spacer()
-                            Picker("", selection: $task.priority) {
-                                ForEach(TaskPriority.allCases, id: \.self) { Text($0.label).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .fixedSize()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                    }
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
-                }
-                .padding(.horizontal, 20)
+            Divider().overlay(Theme.stroke)
+            sheetField("Notes") {
+                TextField("Notes", text: $notes, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(2...4)
             }
-
+            Divider().overlay(Theme.stroke)
             HStack {
+                Text("Category").font(Theme.ui(12)).foregroundStyle(.secondary)
+                Spacer()
+                CategoryPickerButton(selection: $course, courses: courses,
+                                     courseColor: courseColor, onCreateCategory: onCreateCategory)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .strokeBorder(Theme.stroke, lineWidth: 1))
+    }
+
+    private var scheduleCard: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Due date").font(Theme.ui(12))
+                Spacer()
+                Toggle("", isOn: $hasDueDate).toggleStyle(GlowToggleStyle()).labelsHidden()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            // A repeat counts from a start date, so the two switches are tied:
+            // dropping the due date drops the repeat with it.
+            .onChange(of: hasDueDate) { isOn in
+                if !isOn { repeats = false }
+            }
+
+            if hasDueDate {
+                Divider().overlay(Theme.stroke)
+                HStack {
+                    Text(repeats ? "Starts" : "Due").font(Theme.ui(12))
+                    Spacer()
+                    DatePicker("", selection: $dueDay, displayedComponents: .date).labelsHidden()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+
+                Divider().overlay(Theme.stroke)
+                HStack {
+                    Text(repeats ? "At" : "Due time").font(Theme.ui(12))
+                    Spacer()
+                    DatePicker("", selection: $dueTime, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                        .disabled(!hasDueTime)
+                        .opacity(hasDueTime ? 1 : 0.4)
+                    Toggle("", isOn: $hasDueTime).toggleStyle(GlowToggleStyle()).labelsHidden()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            }
+
+            if showsRepeat {
+                repeatToggleRow
+            }
+
+            if repeats, canEditRepeat, showsRepeat {
+                repeatRows
+            }
+        }
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .strokeBorder(Theme.stroke, lineWidth: 1))
+    }
+
+    /// The single checkbox that turns any task into a repeating one — the
+    /// whole schedule below it hangs off this one control.
+    private var repeatToggleRow: some View {
+        VStack(spacing: 0) {
+            Divider().overlay(Theme.stroke)
+            HStack {
+                Toggle(isOn: $repeats) {
+                    Text("Repeats").font(Theme.ui(12))
+                }
+                .toggleStyle(CheckToggleStyle())
+                .disabled(!canEditRepeat)
+                .opacity(canEditRepeat ? 1 : 0.5)
+                // Checking the box needs a start date to count from, so it
+                // supplies one rather than sitting there doing nothing.
+                .onChange(of: repeats) { isOn in
+                    if isOn { hasDueDate = true }
+                }
+                Spacer()
+                if repeats, !canEditRepeat {
+                    Text(scheduleSummary)
+                        .font(Theme.ui(10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+    }
+
+    @ViewBuilder
+    private var repeatRows: some View {
+        Divider().overlay(Theme.stroke)
+        HStack {
+            Text("Every").font(Theme.ui(12))
+            Spacer()
+            Picker("", selection: $repeatRule) {
+                ForEach(Self.repeatOptions, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+
+        Divider().overlay(Theme.stroke)
+        HStack {
+            Text("How often").font(Theme.ui(12))
+            Spacer()
+            Text(repeatRule.intervalLabel(interval))
+                .font(Theme.ui(12))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Stepper("", value: $interval, in: 1...52).labelsHidden()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+
+        if repeatRule == .weekly {
+            Divider().overlay(Theme.stroke)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("On these days").font(Theme.ui(10)).foregroundStyle(.secondary)
+                WeekdayPicker(selection: $weekdays)
+                if weekdays.isEmpty {
+                    Text("No days picked — it'll repeat weekly on "
+                         + dueDay.formatted(.dateTime.weekday(.wide)) + ".")
+                        .font(Theme.ui(10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+
+        Divider().overlay(Theme.stroke)
+        HStack {
+            Text("Ends").font(Theme.ui(12))
+            Spacer()
+            DatePicker("", selection: $endDate, in: dueDay..., displayedComponents: .date)
+                .labelsHidden()
+                .disabled(!hasEndDate)
+                .opacity(hasEndDate ? 1 : 0.4)
+            Toggle("", isOn: $hasEndDate).toggleStyle(GlowToggleStyle()).labelsHidden()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+
+        Divider().overlay(Theme.stroke)
+        Label(previewSummary,
+              systemImage: previewDates.isEmpty ? "exclamationmark.triangle.fill" : "square.on.square")
+            .font(Theme.ui(10))
+            .foregroundStyle(previewDates.isEmpty ? Theme.danger : .secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack {
+            if let onDelete {
                 Button {
                     if seriesDeleteCount > 1 {
                         showingDeleteChoice = true
@@ -1903,32 +1894,32 @@ struct TaskEditSheet: View {
                     Text("Delete only the \(dueLabel) occurrence, or every remaining one in the series? "
                          + "Occurrences you\u{2019}ve already completed are kept either way.")
                 }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(SoftPillButtonStyle())
-                    .keyboardShortcut(.cancelAction)
-                Button("Save") {
-                    if !hasDueDate {
-                        task.dueDate = nil
-                        task.repeatRule = .none
-                        task.repeatWeekdays = []
-                        task.repeatInterval = 1
-                    } else if let due = task.dueDate {
-                        task.dueDate = hasDueTime
-                            ? combineDateAndTime(date: due, time: dueTime)
-                            : Calendar.current.startOfDay(for: due)
-                    }
-                    onSave(task)
-                    dismiss()
-                }
-                .buttonStyle(ProminentPillButtonStyle())
-                .keyboardShortcut(.defaultAction)
-                .disabled(task.title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .padding(20)
+            Spacer()
+            Button("Cancel") { dismiss() }
+                .buttonStyle(SoftPillButtonStyle())
+                .keyboardShortcut(.cancelAction)
+            Button(saveLabel) {
+                onSave(TaskPlan(title: title, notes: notes, course: course,
+                                dueDate: combinedDueDate,
+                                repeatRule: effectiveRule,
+                                weekdays: effectiveRule == .weekly ? weekdays : [],
+                                interval: effectiveRule == .none ? 1 : interval,
+                                endDate: effectiveRule != .none && hasEndDate ? endDate : nil,
+                                appliesToSeries: isSeriesMember && applyToSeries))
+                dismiss()
+            }
+            .buttonStyle(ProminentPillButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .disabled(!canSave)
         }
-        .frame(width: 440, height: 480)
-        .background(Theme.bg)
+        .padding(20)
+    }
+
+    private var saveLabel: String {
+        guard isNew else { return applyToSeries ? "Save Series" : "Save" }
+        let count = previewDates.count
+        return count > 1 ? "Add \(count) Tasks" : "Add Task"
     }
 
     /// How many tasks "Delete All" would actually remove: every pending
@@ -1947,10 +1938,23 @@ struct TaskEditSheet: View {
         return due.formatted(.dateTime.month(.abbreviated).day())
     }
 
-    private func sheetField<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+    /// Points the date controls at `date`, keeping the "has a time" switch in
+    /// step with whether that date carries one.
+    private func applyDate(_ date: Date?) {
+        guard let date else { return }
+        let calendar = Calendar.current
+        hasDueDate = true
+        dueDay = calendar.startOfDay(for: date)
+        dueTime = date
+        let time = calendar.dateComponents([.hour, .minute], from: date)
+        hasDueTime = (time.hour ?? 0) != 0 || (time.minute ?? 0) != 0
+    }
+
+    private func sheetField<Content: View>(_ label: String,
+                                           @ViewBuilder content: () -> Content) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(label)
-                .font(.callout)
+                .font(Theme.ui(12))
                 .foregroundStyle(.secondary)
                 .frame(width: 52, alignment: .leading)
             content()
@@ -1958,4 +1962,18 @@ struct TaskEditSheet: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
+}
+
+/// Merges the calendar date from `date` with the hour/minute from `time`.
+private func combineDateAndTime(date: Date, time: Date) -> Date {
+    let calendar = Calendar.current
+    let dateComponents = calendar.dateComponents([.year, .month, .day], from: date)
+    let timeComponents = calendar.dateComponents([.hour, .minute], from: time)
+    var merged = DateComponents()
+    merged.year = dateComponents.year
+    merged.month = dateComponents.month
+    merged.day = dateComponents.day
+    merged.hour = timeComponents.hour
+    merged.minute = timeComponents.minute
+    return calendar.date(from: merged) ?? date
 }

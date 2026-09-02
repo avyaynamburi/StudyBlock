@@ -10,6 +10,8 @@ import UserNotifications
 @MainActor
 final class FocusTimerController: ObservableObject {
     static let presetMinutes = [25, 45, 50]
+    /// Offered when a session that has run out asks whether to keep going.
+    static let extendMinutes = [5, 10, 15, 30]
 
     @Published private(set) var endDate: Date?
     @Published private(set) var remaining: TimeInterval = 0
@@ -19,6 +21,13 @@ final class FocusTimerController: ObservableObject {
     /// Set when a locked session's safety valve trips (see `pollHelperHealth`).
     /// Stays set — surfaced as a banner — until the user acknowledges it.
     @Published var helperStuckWarning = false
+    /// True once a *task-linked* session has reached zero. The session stays
+    /// open — the block stays on and the clock keeps counting up — until the
+    /// user comes back and either finishes or extends it, so time away from
+    /// the desk isn't silently counted as the end of studying.
+    @Published private(set) var isAwaitingConfirmation = false
+    /// How long the session has been sitting past its deadline.
+    @Published private(set) var overtime: TimeInterval = 0
 
     private let blocker: BlockerViewModel
     private let stats: StatsStore
@@ -79,6 +88,18 @@ final class FocusTimerController: ObservableObject {
 
     var lockedUntilLabel: String {
         endDate.map { $0.formatted(date: .omitted, time: .shortened) } ?? ""
+    }
+
+    var overtimeLabel: String {
+        let total = max(0, Int(overtime.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// Minutes the session has actually run, overtime included — what gets
+    /// credited when the user finally finishes it.
+    var elapsedMinutes: Int {
+        guard let startDate else { return 0 }
+        return Int((Date().timeIntervalSince(startDate) / 60).rounded())
     }
 
     func start(minutes: Int, task: TodoItem? = nil, locked: Bool = false) {
@@ -163,8 +184,17 @@ final class FocusTimerController: ObservableObject {
         currentTaskCourse = defaults.string(forKey: Keys.taskCourse)
         endDate = end
         if end <= Date() {
-            // Session elapsed while the app was closed.
-            finish(completed: true, notify: false)
+            // Elapsed while the app was closed. A task session comes back
+            // still waiting to be finished, which is the whole point of it not
+            // ending on its own; one without a task just closes out.
+            if currentTaskID != nil {
+                isAwaitingConfirmation = true
+                overtime = -(endDate?.timeIntervalSinceNow ?? 0)
+                isLockedSession = false
+                startTicker()
+            } else {
+                finish(completed: true, notify: false)
+            }
         } else {
             if isLockedSession { beginHelperHealthTracking() }
             startTicker()
@@ -205,12 +235,73 @@ final class FocusTimerController: ObservableObject {
 
     private func tick() {
         guard let endDate else { return }
-        remaining = endDate.timeIntervalSinceNow
-        if remaining <= 0 {
-            finish(completed: true)
+        let left = endDate.timeIntervalSinceNow
+        remaining = max(0, left)
+
+        if left <= 0 {
+            // A session started from a task waits for its owner instead of
+            // ending itself. One without a task has nobody to report back to,
+            // so it still finishes on its own.
+            guard currentTaskID != nil else {
+                finish(completed: true)
+                return
+            }
+            if !isAwaitingConfirmation { beginAwaitingConfirmation() }
+            overtime = -left
             return
         }
         if isLockedSession { checkHelperHealthIfDue() }
+    }
+
+    /// Enters the "time is up, still waiting" state.
+    ///
+    /// A locked session stops counting as locked here: the helper released its
+    /// hold at the deadline, so there is nothing left to enforce, and leaving
+    /// the flag set would keep the "no giving up" UI on screen and make the
+    /// health check treat the expired lock as a helper that has gone silent.
+    private func beginAwaitingConfirmation() {
+        isAwaitingConfirmation = true
+        isLockedSession = false
+        lastHelperContact = nil
+        announceCompletion(minutes: plannedMinutes)
+    }
+
+    private var plannedMinutes: Int {
+        guard let startDate, let endDate else { return 0 }
+        return Int((endDate.timeIntervalSince(startDate) / 60).rounded())
+    }
+
+    /// Finishes a session that has been waiting at zero, crediting everything
+    /// it actually ran — the overtime included.
+    func finishAwaited() {
+        guard isAwaitingConfirmation else { return }
+        isAwaitingConfirmation = false
+        overtime = 0
+        finish(completed: true, notify: false, endingAt: Date())
+    }
+
+    /// Adds time, either to a session still running or to one waiting at zero.
+    /// From a waiting state the clock restarts from now rather than from the
+    /// old deadline, so "extend 10 minutes" always buys ten more minutes
+    /// rather than however much is left after the overtime.
+    func extend(by minutes: Int) {
+        guard isRunning, minutes > 0 else { return }
+        // A lock that's still in force can't be lengthened: the helper refuses
+        // a second startLockedSession while one is active, so the app would
+        // end up counting toward a deadline the helper had already released,
+        // and the health check would later read that as a silent helper.
+        // Once the lock expires — which is exactly when a session starts
+        // waiting — extending is free.
+        guard !isLockedSession else { return }
+        let base = isAwaitingConfirmation ? Date() : (endDate ?? Date())
+        let newEnd = base.addingTimeInterval(TimeInterval(minutes * 60))
+
+        endDate = newEnd
+        remaining = max(0, newEnd.timeIntervalSinceNow)
+        overtime = 0
+        isAwaitingConfirmation = false
+        UserDefaults.standard.set(newEnd, forKey: Keys.end)
+        startTicker()
     }
 
     /// Safety valve for a locked session whose helper has gone silent (crash,
@@ -244,13 +335,13 @@ final class FocusTimerController: ObservableObject {
         helperStuckWarning = false
     }
 
-    private func finish(completed: Bool, notify: Bool = true) {
+    private func finish(completed: Bool, notify: Bool = true, endingAt: Date? = nil) {
         blocker.isSessionManaged = false
         guard let end = endDate else { return }
         ticker?.invalidate()
         ticker = nil
 
-        let sessionEnd = completed ? end : Date()
+        let sessionEnd = endingAt ?? (completed ? end : Date())
         let minutes = sessionEnd.timeIntervalSince(startDate ?? sessionEnd) / 60
         stats.record(minutes: minutes, completed: completed,
                      course: currentTaskCourse, taskTitle: currentTaskTitle)
@@ -259,6 +350,8 @@ final class FocusTimerController: ObservableObject {
         endDate = nil
         startDate = nil
         remaining = 0
+        overtime = 0
+        isAwaitingConfirmation = false
         isLockedSession = false
         currentTaskID = nil
         currentTaskTitle = nil

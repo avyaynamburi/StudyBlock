@@ -50,19 +50,19 @@ struct FlashcardsView: View {
             HStack(spacing: 8) {
                 TextField("New deck", text: $newDeckName)
                     .textFieldStyle(.plain)
-                    .font(.callout)
+                    .font(Theme.ui(12))
                     .onSubmit(addDeck)
                 Button(action: addDeck) {
                     Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(Theme.ui(11, .semibold))
                 }
                 .buttonStyle(IconButtonStyle(tint: Theme.accent))
                 .disabled(newDeckName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
         }
     }
 
@@ -97,40 +97,40 @@ private struct DeckRailItem: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(isSelected ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Theme.surfaceLow))
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(isSelected ? Theme.accentFill : Theme.surfaceLow)
                         .frame(width: 28, height: 28)
                     Image(systemName: "rectangle.on.rectangle.angled")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(Theme.ui(11, .semibold))
                         .foregroundStyle(isSelected ? .white : .secondary)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(deck.name)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Theme.ui(13, .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     Text("\(deck.cards.count) card\(deck.cards.count == 1 ? "" : "s")")
-                        .font(.caption2)
+                        .font(Theme.ui(10))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
                 if deck.dueCount() > 0 {
                     Text("\(deck.dueCount())")
-                        .font(.caption2.weight(.bold))
+                        .font(Theme.ui(10, .semibold))
                         .foregroundStyle(Theme.accent)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Theme.accentSoft, in: Capsule())
+                        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 3, style: .continuous))
                 }
             }
             .padding(9)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(isSelected ? Theme.surface : (hovering ? Theme.surfaceLow.opacity(0.7) : .clear))
             )
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(isSelected ? Theme.stroke : .clear, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
         .animation(.easeOut(duration: 0.12), value: hovering)
@@ -147,7 +147,7 @@ struct DeckEditor: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Text(deck.name)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(Theme.ui(17, .semibold))
                 Spacer()
                 Button("Practice All") {
                     onReview(ReviewSession(deck: deck, mode: .practice))
@@ -208,7 +208,7 @@ private struct CardRow: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Q")
-                    .font(.caption2.weight(.bold))
+                    .font(Theme.ui(10, .semibold))
                     .foregroundStyle(Theme.accent)
                 TextField("Question", text: field(\.front), axis: .vertical)
                     .textFieldStyle(.plain)
@@ -220,7 +220,7 @@ private struct CardRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("A")
-                    .font(.caption2.weight(.bold))
+                    .font(Theme.ui(10, .semibold))
                     .foregroundStyle(Theme.violet)
                 TextField("Answer", text: field(\.back), axis: .vertical)
                     .textFieldStyle(.plain)
@@ -234,15 +234,15 @@ private struct CardRow: View {
                 store.update(updated)
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(Theme.ui(9, .semibold))
             }
             .buttonStyle(IconButtonStyle())
             .opacity(hovering ? 1 : 0)
             .help("Delete card")
         }
         .padding(12)
-        .background(Theme.surfaceLow.opacity(0.6), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
+        .background(Theme.surfaceLow.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
         .animation(.easeOut(duration: 0.12), value: hovering)
         .onHover { hovering = $0 }
     }

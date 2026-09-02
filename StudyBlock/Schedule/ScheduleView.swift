@@ -21,9 +21,9 @@ struct ScheduleView: View {
             }
 
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 22) {
                     WeekGrid(schedules: scheduler.schedules, activeIDs: scheduler.activeIDs)
-                        .card()
+                        .sectionDivider()
 
                     if scheduler.schedules.isEmpty {
                         EmptyState(icon: "calendar",
@@ -32,12 +32,21 @@ struct ScheduleView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 30)
                     } else {
-                        VStack(spacing: 10) {
-                            ForEach(scheduler.schedules) { schedule in
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Schedules")
+                                .font(Theme.ui(11, .semibold))
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                                .kerning(0.5)
+                                .padding(.bottom, 6)
+
+                            ForEach(Array(scheduler.schedules.enumerated()), id: \.element.id) { index, schedule in
+                                if index > 0 {
+                                    Divider().overlay(Theme.stroke)
+                                }
                                 row(schedule)
                             }
                         }
-                        .card()
                     }
                 }
                 .padding(.horizontal, 28)
@@ -83,27 +92,27 @@ struct ScheduleView: View {
                     .fill(isActive ? Theme.successSoft : Theme.surfaceLow)
                     .frame(width: 34, height: 34)
                 Image(systemName: isActive ? "shield.fill" : "clock")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.ui(13, .semibold))
                     .foregroundStyle(isActive ? Theme.success : .secondary)
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 7) {
                     Text(schedule.name.isEmpty ? "Untitled" : schedule.name)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(Theme.ui(14, .semibold))
                         .foregroundStyle(schedule.isEnabled ? .primary : .secondary)
                     if isActive {
                         Text("ON NOW")
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .font(Theme.ui(9, .semibold))
                             .kerning(0.4)
                             .foregroundStyle(Theme.success)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Theme.successSoft, in: Capsule())
+                            .background(Theme.successSoft, in: RoundedRectangle(cornerRadius: 3, style: .continuous))
                     }
                 }
                 Text("\(schedule.daysLabel) · \(schedule.timeLabel) · \(listsLabel(schedule))")
-                    .font(.caption)
+                    .font(Theme.ui(10))
                     .foregroundStyle(.secondary)
             }
 
@@ -118,7 +127,7 @@ struct ScheduleView: View {
                 Button("Delete Schedule", role: .destructive) { deleting = schedule }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.ui(11, .semibold))
                     .foregroundStyle(.secondary)
             }
             .menuStyle(.borderlessButton)
@@ -132,11 +141,8 @@ struct ScheduleView: View {
             .toggleStyle(GlowToggleStyle())
             .labelsHidden()
         }
-        .padding(12)
-        .background(Theme.surfaceLow.opacity(schedule.isEnabled ? 1 : 0.5),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(isActive ? Theme.success : Theme.stroke, lineWidth: isActive ? 1.5 : 1))
+        .padding(.vertical, 11)
+        .opacity(schedule.isEnabled ? 1 : 0.55)
     }
 
     private func listsLabel(_ schedule: BlockSchedule) -> String {
@@ -178,14 +184,11 @@ private struct WeekGrid: View {
         let height = CGFloat(hours.upperBound - hours.lowerBound) * Self.hourHeight
 
         VStack(alignment: .leading, spacing: 10) {
-            Text("Your week")
-                .font(.system(size: 15, weight: .semibold))
-
             HStack(spacing: 0) {
                 Color.clear.frame(width: Self.gutter)
                 ForEach(1...7, id: \.self) { day in
                     Text(Self.dayNames[day - 1])
-                        .font(.caption2.weight(.semibold))
+                        .font(Theme.ui(10, .semibold))
                         .foregroundStyle(day == todayWeekday ? Theme.accent : .secondary)
                         .frame(maxWidth: .infinity)
                 }
@@ -196,7 +199,7 @@ private struct WeekGrid: View {
                 VStack(alignment: .trailing, spacing: 0) {
                     ForEach(hours.lowerBound..<hours.upperBound, id: \.self) { hour in
                         Text(BlockSchedule.clockLabel(hour * 60))
-                            .font(.system(size: 9))
+                            .font(Theme.ui(9))
                             .foregroundStyle(.tertiary)
                             .frame(height: Self.hourHeight, alignment: .top)
                             .offset(y: -4)
@@ -234,12 +237,11 @@ private struct WeekGrid: View {
                 ForEach(bars(for: day), id: \.key) { bar in
                     let top = offset(forMinute: bar.start, in: hours)
                     let bottom = offset(forMinute: bar.end, in: hours)
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(bar.isActive ? AnyShapeStyle(Theme.accentGradient)
-                                           : AnyShapeStyle(Theme.accent.opacity(0.28)))
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(bar.isActive ? Theme.accentFill : Theme.accent.opacity(0.22))
                         .overlay(alignment: .topLeading) {
                             Text(bar.name)
-                                .font(.system(size: 9, weight: .semibold))
+                                .font(Theme.ui(9, .semibold))
                                 .foregroundStyle(bar.isActive ? .white : Theme.accent)
                                 .lineLimit(1)
                                 .padding(.horizontal, 4)

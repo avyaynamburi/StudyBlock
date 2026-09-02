@@ -1,20 +1,5 @@
 import Foundation
 
-enum TaskPriority: Int, Codable, CaseIterable, Comparable {
-    case none = 0, low, medium, high
-
-    static func < (lhs: TaskPriority, rhs: TaskPriority) -> Bool { lhs.rawValue < rhs.rawValue }
-
-    var label: String {
-        switch self {
-        case .none: return "None"
-        case .low: return "Low"
-        case .medium: return "Medium"
-        case .high: return "High"
-        }
-    }
-}
-
 enum RepeatRule: String, Codable, CaseIterable {
     case none, daily, weekly, monthly
 
@@ -48,7 +33,7 @@ enum RepeatRule: String, Codable, CaseIterable {
         }
     }
 
-    /// "Every 2 weeks", "Every month" — the phrase the recurring sheet shows
+    /// "Every 2 weeks", "Every month" — the phrase the task editor shows
     /// beside its interval stepper.
     func intervalLabel(_ interval: Int) -> String {
         guard self != .none else { return label }
@@ -219,7 +204,6 @@ struct TodoItem: Identifiable, Codable, Equatable {
     var notes = ""
     var course: String?
     var dueDate: Date?
-    var priority: TaskPriority = .none
     var repeatRule: RepeatRule = .none
     /// 1 = Sunday … 7 = Saturday. Only meaningful when `repeatRule == .weekly`.
     var repeatWeekdays: Set<Int> = []
@@ -268,7 +252,7 @@ struct TodoItem: Identifiable, Codable, Equatable {
 
     /// Expands this task, used as a template, into one real task per
     /// occurrence of its series — the "recurring tasks are literally
-    /// duplicated" rule in one place, so the Recurring Task sheet and CSV
+    /// duplicated" rule in one place, so the task editor and CSV
     /// import build byte-identical sets of tasks.
     ///
     /// Every copy is independent: completing one leaves the rest untouched.

@@ -40,7 +40,17 @@ struct StudyBlockApp: App {
         .windowStyle(.hiddenTitleBar)
 
         MenuBarExtra {
-            if timer.isRunning {
+            if timer.isAwaitingConfirmation {
+                // The session is over but still open, and the window may not
+                // be. Finishing and extending have to be reachable from here.
+                Text("Time's up — \(timer.overtimeLabel) over")
+                Button("Finish Session") { timer.finishAwaited() }
+                Menu("Keep Going") {
+                    ForEach(FocusTimerController.extendMinutes, id: \.self) { extra in
+                        Button("\(extra) more minutes") { timer.extend(by: extra) }
+                    }
+                }
+            } else if timer.isRunning {
                 Text("Focus session — \(timer.remainingLabel) left")
                 if timer.isLockedSession {
                     Text("Locked until \(timer.lockedUntilLabel)")
@@ -65,7 +75,9 @@ struct StudyBlockApp: App {
             Divider()
             Button("Quit StudyBlock") { NSApplication.shared.terminate(nil) }
         } label: {
-            if timer.isRunning {
+            if timer.isAwaitingConfirmation {
+                Text("done").monospacedDigit()
+            } else if timer.isRunning {
                 Text(timer.remainingLabel).monospacedDigit()
             }
             Image(systemName: blocker.isBlocking ? "shield.fill" : "shield")

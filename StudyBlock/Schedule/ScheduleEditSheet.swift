@@ -23,7 +23,7 @@ struct ScheduleEditSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             Text(isNew ? "New Schedule" : "Edit Schedule")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(Theme.ui(16, .semibold))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
@@ -33,7 +33,7 @@ struct ScheduleEditSheet: View {
                 VStack(spacing: 12) {
                     VStack(spacing: 0) {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text("Name").font(.callout).foregroundStyle(.secondary)
+                            Text("Name").font(Theme.ui(12)).foregroundStyle(.secondary)
                                 .frame(width: 64, alignment: .leading)
                             TextField("e.g. School hours, Evening study", text: $schedule.name)
                                 .textFieldStyle(.plain)
@@ -43,7 +43,7 @@ struct ScheduleEditSheet: View {
 
                         Divider().overlay(Theme.stroke)
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("On these days").font(.caption).foregroundStyle(.secondary)
+                            Text("On these days").font(Theme.ui(10)).foregroundStyle(.secondary)
                             WeekdayPicker(selection: $schedule.weekdays)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -52,11 +52,11 @@ struct ScheduleEditSheet: View {
 
                         Divider().overlay(Theme.stroke)
                         HStack {
-                            Text("From").font(.callout)
+                            Text("From").font(Theme.ui(12))
                             Spacer()
                             DatePicker("", selection: $start, displayedComponents: .hourAndMinute)
                                 .labelsHidden()
-                            Text("to").font(.callout).foregroundStyle(.secondary)
+                            Text("to").font(Theme.ui(12)).foregroundStyle(.secondary)
                             DatePicker("", selection: $end, displayedComponents: .hourAndMinute)
                                 .labelsHidden()
                         }
@@ -67,7 +67,7 @@ struct ScheduleEditSheet: View {
                             Divider().overlay(Theme.stroke)
                             Label("Runs overnight — it starts on the days above and ends the next morning.",
                                   systemImage: "moon.stars")
-                                .font(.caption)
+                                .font(Theme.ui(10))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -75,17 +75,17 @@ struct ScheduleEditSheet: View {
                                 .padding(.vertical, 8)
                         }
                     }
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .strokeBorder(Theme.stroke, lineWidth: 1))
 
                     VStack(alignment: .leading, spacing: 0) {
                         HStack {
-                            Text("Block lists").font(.callout)
+                            Text("Block lists").font(Theme.ui(12))
                             Spacer()
                             Text(schedule.groupIDs.isEmpty ? "Every list"
                                  : "\(schedule.groupIDs.count) selected")
-                                .font(.caption)
+                                .font(Theme.ui(10))
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.horizontal, 14)
@@ -94,7 +94,7 @@ struct ScheduleEditSheet: View {
                         if groups.isEmpty {
                             Divider().overlay(Theme.stroke)
                             Text("No block lists yet — make one on the Focus page.")
-                                .font(.caption)
+                                .font(Theme.ui(10))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 10)
@@ -115,9 +115,9 @@ struct ScheduleEditSheet: View {
                                     }
                                 )) {
                                     HStack(spacing: 8) {
-                                        Text(group.name).font(.callout)
+                                        Text(group.name).font(Theme.ui(12))
                                         Text("\(group.domains.count)")
-                                            .font(.caption2.weight(.semibold))
+                                            .font(Theme.ui(10, .semibold))
                                             .foregroundStyle(.tertiary)
                                     }
                                 }
@@ -127,13 +127,13 @@ struct ScheduleEditSheet: View {
                             }
                         }
                     }
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .strokeBorder(Theme.stroke, lineWidth: 1))
 
                     Label("A schedule never locks. It switches blocking on when the window opens \u{2014} you can always switch it off.",
                           systemImage: "lock.open")
-                        .font(.caption)
+                        .font(Theme.ui(10))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)

@@ -54,13 +54,13 @@ struct ReviewView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Text(deck.name)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(Theme.ui(16, .semibold))
             TagChip(text: mode == .study ? "Study" : (onRetryPass ? "Retrying missed" : "Practice"),
                     color: mode == .study ? Theme.accent : Theme.violet)
             Spacer()
             if index < queue.count {
                 Text("\(queue.count - index) left")
-                    .font(.caption.weight(.medium))
+                    .font(Theme.ui(10, .medium))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
@@ -68,7 +68,7 @@ struct ReviewView: View {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(Theme.ui(11, .semibold))
             }
             .buttonStyle(IconButtonStyle())
             .keyboardShortcut(.cancelAction)
@@ -80,7 +80,7 @@ struct ReviewView: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Theme.surfaceLow)
                 Capsule()
-                    .fill(Theme.accentGradient)
+                    .fill(Theme.accentFill)
                     .frame(width: geo.size.width * progressFraction)
                     .animation(.easeOut(duration: 0.25), value: progressFraction)
             }
@@ -96,26 +96,25 @@ struct ReviewView: View {
     private func cardView(_ card: Flashcard) -> some View {
         VStack(spacing: 16) {
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Theme.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(showBack ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Theme.stroke),
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(showBack ? Theme.accentFill : Theme.stroke,
                                       lineWidth: showBack ? 1.5 : 1))
-                    .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
 
                 VStack(spacing: 10) {
                     Text(showBack ? "ANSWER" : "QUESTION")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(Theme.ui(10, .semibold))
                         .kerning(1.2)
                         .foregroundStyle(showBack ? Theme.violet : Theme.accent)
                     Text(showBack ? card.back : card.front)
-                        .font(.system(size: 19, weight: .medium))
+                        .font(Theme.ui(19, .medium))
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                     Spacer(minLength: 0)
                     if !showBack {
                         Text("Click or press space to flip")
-                            .font(.caption2)
+                            .font(Theme.ui(10))
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -123,7 +122,7 @@ struct ReviewView: View {
                 .rotation3DEffect(.degrees(showBack ? -180 : 0), axis: (x: 0, y: 1, z: 0))
             }
             .rotation3DEffect(.degrees(showBack ? 180 : 0), axis: (x: 0, y: 1, z: 0))
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .onTapGesture { flip() }
             .frame(maxHeight: .infinity)
 
@@ -193,7 +192,7 @@ struct ReviewView: View {
                     .fill(starred ? Theme.amberSoft : Theme.successSoft)
                     .frame(width: 74, height: 74)
                 Image(systemName: starred ? "star.fill" : "checkmark.seal.fill")
-                    .font(.system(size: 32))
+                    .font(Theme.ui(32))
                     .foregroundStyle(starred ? Theme.amber : Theme.success)
             }
 
@@ -203,12 +202,12 @@ struct ReviewView: View {
                      ? "Nothing due — come back later"
                      : "Reviewed \(firstPassCount) card\(firstPassCount == 1 ? "" : "s")"
                        + (againCount > 0 ? " (\(againCount) needed a retry)" : ""))
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(Theme.ui(18, .semibold))
                 Button("Done") { dismiss() }
                     .buttonStyle(ProminentPillButtonStyle(size: .large))
             case .practice:
                 Text("\(gotItCount) of \(firstPassCount) on the first pass")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(Theme.ui(18, .semibold))
                 HStack(spacing: 10) {
                     Button("Practice Again") {
                         queue = deck.cards.shuffled()
@@ -262,10 +261,10 @@ private struct GradeButton: View {
         Button(action: action) {
             VStack(spacing: 1) {
                 Text(label)
-                    .font(.callout.weight(.semibold))
+                    .font(Theme.ui(12, .semibold))
                 if let sublabel {
                     Text(sublabel)
-                        .font(.caption2)
+                        .font(Theme.ui(10))
                         .opacity(0.75)
                 }
             }
@@ -273,12 +272,12 @@ private struct GradeButton: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(prominent ? AnyShapeStyle(color) : AnyShapeStyle(color.opacity(hovering ? 0.22 : 0.13)))
             )
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(color.opacity(prominent ? 0 : 0.25), lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
         .animation(.easeOut(duration: 0.12), value: hovering)

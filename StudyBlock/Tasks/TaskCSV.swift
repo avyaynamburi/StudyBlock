@@ -3,7 +3,7 @@ import Foundation
 /// Round-trippable CSV for tasks.
 ///
 /// The columns are the controls of the task sheets, one for one — category,
-/// color, due date, due time, priority, repeat, end date, notes — so anything
+/// color, due date, due time, repeat, end date, notes — so anything
 /// the app can express, a row can, and vice versa. Values are words, not enum
 /// numbers ("high", not 3), and `due_date` / `due_time` are split so "due
 /// Tuesday, no particular time" is expressible. Only `title` is required.
@@ -27,7 +27,7 @@ enum TaskCSV {
     /// are the ones a person or a model actually fills in; the trailing ones
     /// are bookkeeping that only matters for exact round-trips.
     static let headers = [
-        "title", "category", "color", "due_date", "due_time", "priority",
+        "title", "category", "color", "due_date", "due_time",
         "repeat", "repeat_until", "notes",
         "status", "list", "completed_at", "created_at", "id", "series_id", "manual_order",
     ]
@@ -36,7 +36,7 @@ enum TaskCSV {
     /// rest is bookkeeping the app regenerates, and asking for it is what
     /// made AI-written files come back malformed, so `aiPrompt` and
     /// `template()` both ask for exactly these.
-    static let authoringHeaders = Array(headers.prefix(9))
+    static let authoringHeaders = Array(headers.prefix(8))
 
     // MARK: - Category colors
 
@@ -274,7 +274,6 @@ enum TaskCSV {
             colorValue,
             dueDay,
             dueTime,
-            priorityName(item.priority),
             repeatCode(rule: item.repeatRule, interval: item.repeatInterval,
                        weekdays: item.repeatWeekdays),
             item.seriesEndDate.map(dayFormatter.string(from:)) ?? "",
@@ -287,15 +286,6 @@ enum TaskCSV {
             item.seriesID?.uuidString ?? "",
             item.manualOrder == .greatestFiniteMagnitude ? "" : String(item.manualOrder),
         ]
-    }
-
-    private static func priorityName(_ priority: TaskPriority) -> String {
-        switch priority {
-        case .none: return "none"
-        case .low: return "low"
-        case .medium: return "medium"
-        case .high: return "high"
-        }
     }
 
     // MARK: - Import
@@ -390,19 +380,6 @@ enum TaskCSV {
                     }
                 } else {
                     result.warnings.append("Line \(lineNumber): couldn\u{2019}t read due_date \u{201C}\(dayText)\u{201D} — left with no due date.")
-                }
-            }
-
-            // Priority
-            let priorityText = value("priority").lowercased()
-            if !priorityText.isEmpty {
-                switch priorityText {
-                case "none", "0": item.priority = .none
-                case "low", "1", "!": item.priority = .low
-                case "medium", "med", "2", "!!": item.priority = .medium
-                case "high", "3", "!!!": item.priority = .high
-                default:
-                    result.warnings.append("Line \(lineNumber): unknown priority \u{201C}\(priorityText)\u{201D} — using none.")
                 }
             }
 
@@ -621,7 +598,7 @@ enum TaskCSV {
     /// of duplicating the whole board. A row with **no** id but a repeat rule
     /// is a *definition*: one line saying "discussion post, weekly, Tuesdays",
     /// which is expanded here into the whole run of real tasks, exactly as
-    /// the Recurring Task sheet would have created them.
+    /// the task editor would have created them.
     static func merge(rows: [ImportedRow], into existing: [TodoItem],
                       hues existingHues: [String: Double], now: Date = Date(),
                       calendar: Calendar = .current) -> MergeResult {
@@ -699,15 +676,15 @@ enum TaskCSV {
     /// everything blank.
     static func template() -> String {
         let examples = [
-            ["Read chapter 4", "History", "amber", "2026-09-03", "", "medium", "", "",
+            ["Read chapter 4", "History", "amber", "2026-09-03", "", "", "",
              "Skim the summary first"],
-            ["Discussion post", "History", "amber", "2026-09-01", "23:59", "high", "w:tue",
+            ["Discussion post", "History", "amber", "2026-09-01", "23:59", "w:tue",
              "2026-12-11", ""],
-            ["Lab report", "CSDS302", "blue", "2026-09-04", "17:00", "medium", "2w:fri",
+            ["Lab report", "CSDS302", "blue", "2026-09-04", "17:00", "2w:fri",
              "2026-12-11", "Every other Friday"],
-            ["Office hours", "CSDS302", "blue", "2026-09-04", "14:30", "none", "w:thu", "", ""],
-            ["Pay rent", "", "", "2026-09-01", "", "high", "m", "", ""],
-            ["Buy a lab notebook", "", "", "", "", "low", "", "", ""],
+            ["Office hours", "CSDS302", "blue", "2026-09-04", "14:30", "w:thu", "", ""],
+            ["Pay rent", "", "", "2026-09-01", "", "m", "", ""],
+            ["Buy a lab notebook", "", "", "", "", "", "", ""],
         ]
         var lines = [authoringHeaders.joined(separator: ",")]
         lines.append(contentsOf: examples.map { $0.map(escape).joined(separator: ",") })
@@ -790,7 +767,6 @@ enum TaskCSV {
                         same one every time that category appears
           due_date      YYYY-MM-DD. For a repeating task, its FIRST due date.
           due_time      HH:mm on a 24-hour clock (23:59). Blank means sometime that day.
-          priority      none, low, medium, or high
           repeat        a code from the legend below. Blank means it doesn't repeat.
           repeat_until  YYYY-MM-DD, the last day a repeating task runs. Blank means
                         it repeats indefinitely.
@@ -808,12 +784,12 @@ enum TaskCSV {
 
         A valid reply looks exactly like this:
         \(authoringHeaders.joined(separator: ","))
-        Essay on the Reformation,History,amber,2026-09-04,23:59,high,,,"Thesis, outline, then draft"
-        Discussion post,History,amber,2026-09-01,23:59,high,w:tue,2026-12-11,
-        Problem set,CSDS302,blue,2026-09-05,,medium,2w:fri,2026-12-11,
-        Lecture,CSDS302,blue,2026-09-02,10:00,none,w:mon wed,2026-12-09,
-        Pay rent,,,2026-10-01,,high,m,,
-        Buy a lab notebook,,,,,low,,,
+        Essay on the Reformation,History,amber,2026-09-04,23:59,,,"Thesis, outline, then draft"
+        Discussion post,History,amber,2026-09-01,23:59,w:tue,2026-12-11,
+        Problem set,CSDS302,blue,2026-09-05,,2w:fri,2026-12-11,
+        Lecture,CSDS302,blue,2026-09-02,10:00,w:mon wed,2026-12-09,
+        Pay rent,,,2026-10-01,,m,,
+        Buy a lab notebook,,,,,,,
 
         Those last two rows are fine as they are: a task with no category, no due \
         date, or no repeat just leaves those fields empty.

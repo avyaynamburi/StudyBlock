@@ -51,12 +51,11 @@ anything you can set on a task, you can write in a row.
 | `color` | Color for that category. Set once; it applies everywhere that category appears. | `red` `orange` `amber` `lime` `green` `spring` `cyan` `sky` `blue` `violet` `magenta` `pink`, or a hue number `0`–`359` |
 | `due_date` | Day it's due. For a repeating task, the **first** due date. Blank for no due date. | `YYYY-MM-DD` |
 | `due_time` | Time of day. Leave blank for "sometime that day". | `HH:mm` (24-hour), e.g. `23:59` |
-| `priority` | | `none` `low` `medium` `high` (also accepts `!` `!!` `!!!` or `0`–`3`) |
 | `repeat` | The whole schedule, as one code. Blank means it doesn't repeat. | see the legend below |
 | `repeat_until` | Last day a repeating task runs. **Blank means it repeats indefinitely.** | `YYYY-MM-DD` |
 | `notes` | Anything else worth keeping. Last on the line on purpose — see below. | any text |
 
-Those nine are the whole authoring format, and they're all the template and the
+Those eight are the whole authoring format, and they're all the template and the
 AI prompt ask for.
 
 Two of those choices are deliberate, and both exist because the way a
@@ -127,8 +126,8 @@ expands it on import into real, independent copies — one per due date — the
 same as if you'd used the **Recurring** button in the app.
 
 ```csv
-title,category,color,due_date,due_time,priority,repeat,repeat_until,notes
-Discussion post,History,amber,2026-09-01,23:59,high,w:tue,2026-12-11,
+title,category,color,due_date,due_time,repeat,repeat_until,notes
+Discussion post,History,amber,2026-09-01,23:59,w:tue,2026-12-11,
 ```
 
 That single line creates **15 tasks**, one for each Tuesday from Sept 1 through
@@ -152,13 +151,13 @@ produced, so a single `w:tue` line becoming 100 cards is never a surprise.
 ## Example
 
 ```csv
-title,category,color,due_date,due_time,priority,repeat,repeat_until,notes
-Essay on the Reformation,History,amber,2026-09-04,23:59,high,,,"Thesis, outline, then draft"
-Problem set 3,CSDS302,blue,2026-09-01,,medium,,,
-Lecture reading,CSDS302,blue,2026-08-28,08:00,low,w:mon wed fri,2026-12-11,Ch. 5 pp. 90-120
-Lab report,CSDS302,blue,2026-09-04,17:00,medium,2w:fri,2026-12-11,
-Standup,,,2026-09-01,09:00,none,d,,
-Water the plants,,,,,low,,,
+title,category,color,due_date,due_time,repeat,repeat_until,notes
+Essay on the Reformation,History,amber,2026-09-04,23:59,,,"Thesis, outline, then draft"
+Problem set 3,CSDS302,blue,2026-09-01,,,,
+Lecture reading,CSDS302,blue,2026-08-28,08:00,w:mon wed fri,2026-12-11,Ch. 5 pp. 90-120
+Lab report,CSDS302,blue,2026-09-04,17:00,2w:fri,2026-12-11,
+Standup,,,2026-09-01,09:00,d,,
+Water the plants,,,,,,,
 ```
 
 Row by row: a one-off essay, with a note containing commas so it's quoted; a

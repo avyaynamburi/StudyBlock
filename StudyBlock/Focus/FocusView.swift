@@ -25,8 +25,8 @@ struct FocusView: View {
                        : "Websites and apps are blocked while a session runs")
 
             ScrollView {
-                VStack(spacing: 16) {
-                    timerCard
+                VStack(spacing: 20) {
+                    timerCard.sectionDivider()
 
                     if model.helperState != .ready {
                         helperBanner(icon: "gearshape.2.fill",
@@ -50,21 +50,21 @@ struct FocusView: View {
 
                     if let error = model.lastError {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout)
+                            .font(Theme.ui(12))
                             .foregroundStyle(Theme.danger)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(14)
-                            .background(Theme.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(Theme.dangerSoft, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
 
                     if let hint = tabCloser.permissionHint {
                         Label(hint, systemImage: "hand.raised")
-                            .font(.callout)
+                            .font(Theme.ui(12))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    shieldCard
+                    shieldCard.sectionDivider()
                     blockedAppsCard
                 }
                 .padding(.horizontal, 28)
@@ -94,17 +94,17 @@ struct FocusView: View {
                     .stroke(Theme.accentSoft, lineWidth: 10)
                 Circle()
                     .trim(from: 0, to: timer.progress)
-                    .stroke(Theme.accentGradient, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                    .stroke(Theme.accentFill, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .shadow(color: Theme.accent.opacity(0.5), radius: 8)
                     .animation(.linear(duration: 1), value: timer.progress)
 
                 VStack(spacing: 2) {
-                    Text(timer.remainingLabel)
+                    Text(timer.isAwaitingConfirmation ? timer.overtimeLabel : timer.remainingLabel)
                         .font(Theme.number(44))
                         .monospacedDigit()
-                    Text("remaining")
-                        .font(.caption.weight(.medium))
+                        .foregroundStyle(timer.isAwaitingConfirmation ? Theme.success : .primary)
+                    Text(timer.isAwaitingConfirmation ? "over" : "remaining")
+                        .font(Theme.ui(10, .medium))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -115,24 +115,25 @@ struct FocusView: View {
                 TagChip(text: taskTitle, color: Theme.accent)
             }
 
-            Text(model.isBlocking
-                 ? "Blocking \(model.domains.count) website\(model.domains.count == 1 ? "" : "s") until the timer ends"
-                 : "Timer running — websites not blocked")
-                .font(.callout)
+            Text(timerCaption)
+                .font(Theme.ui(12))
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
 
-            if timer.isLockedSession {
+            if timer.isAwaitingConfirmation {
+                awaitingControls
+            } else if timer.isLockedSession {
                 VStack(spacing: 8) {
                     Label("Locked until \(timer.lockedUntilLabel) — no giving up", systemImage: "lock.fill")
-                        .font(.callout.weight(.medium))
+                        .font(Theme.ui(12, .medium))
                         .foregroundStyle(Theme.amber)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
-                        .background(Theme.amberSoft, in: Capsule())
+                        .background(Theme.amberSoft, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
 
                     Button("Unlock early…") { showingUnlockChallenge = true }
                         .buttonStyle(.plain)
-                        .font(.caption)
+                        .font(Theme.ui(10))
                         .foregroundStyle(.tertiary)
                 }
             } else {
@@ -145,13 +146,57 @@ struct FocusView: View {
         }
     }
 
+    private var timerCaption: String {
+        if timer.isAwaitingConfirmation {
+            return model.isBlocking
+                ? "Time's up — still blocking until you finish the session"
+                : "Time's up — the session stays open until you finish it"
+        }
+        return model.isBlocking
+            ? "Blocking \(model.domains.count) website\(model.domains.count == 1 ? "" : "s") until the timer ends"
+            : "Timer running — websites not blocked"
+    }
+
+    /// Shown when a task session has run out. It deliberately doesn't end
+    /// itself, so this is the only way out — finish it, or buy more time.
+    private var awaitingControls: some View {
+        VStack(spacing: 12) {
+            Label("Time's up on this task", systemImage: "checkmark.circle")
+                .font(Theme.ui(12, .medium))
+                .foregroundStyle(Theme.success)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(Theme.successSoft, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+            VStack(spacing: 7) {
+                Text("Keep going")
+                    .font(Theme.ui(10, .medium))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    ForEach(FocusTimerController.extendMinutes, id: \.self) { extra in
+                        Button("+\(extra)m") { timer.extend(by: extra) }
+                            .buttonStyle(SoftPillButtonStyle(tint: Theme.accent))
+                    }
+                }
+            }
+
+            Button {
+                timer.finishAwaited()
+            } label: {
+                Label("Finish Session", systemImage: "flag.checkered")
+            }
+            .buttonStyle(ProminentPillButtonStyle(size: .large))
+            .help("Records \(timer.elapsedMinutes) minutes of focus and releases the block")
+        }
+    }
+
     private var idleTimer: some View {
         VStack(spacing: 18) {
             VStack(spacing: 4) {
                 Text("Start a focus session")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .font(Theme.ui(20, .semibold))
                 Text("Distracting websites and apps are blocked automatically while the timer runs.")
-                    .font(.callout)
+                    .font(Theme.ui(12))
                     .foregroundStyle(.secondary)
             }
 
@@ -171,8 +216,9 @@ struct FocusView: View {
                         .frame(width: 68)
                     stepperButton("plus") { customMinutes = min(180, customMinutes + 5) }
                 }
-                .background(Theme.surfaceLow, in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.stroke, lineWidth: 1))
+                .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .strokeBorder(Theme.stroke, lineWidth: 1))
 
                 Button {
                     timer.start(minutes: customMinutes, locked: lockSessions)
@@ -186,13 +232,13 @@ struct FocusView: View {
             VStack(spacing: 6) {
                 Toggle(isOn: $lockSessions) {
                     Text("Lock sessions — no giving up until time is up")
-                        .font(.callout)
+                        .font(Theme.ui(12))
                 }
                 .toggleStyle(CheckToggleStyle())
 
                 if lockSessions {
                     Text("The helper enforces the lock: quitting the app, editing /etc/hosts, or rebooting won't unblock early. Max 8 hours.")
-                        .font(.caption)
+                        .font(Theme.ui(10))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 420)
@@ -204,7 +250,7 @@ struct FocusView: View {
     private func stepperButton(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Theme.ui(12, .semibold))
                 .frame(width: 34, height: 34)
                 .contentShape(Rectangle())
         }
@@ -220,12 +266,12 @@ struct FocusView: View {
             ZStack {
                 Circle().fill(softTint).frame(width: 38, height: 38)
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Theme.ui(15, .semibold))
                     .foregroundStyle(tint)
             }
             VStack(alignment: .leading, spacing: 10) {
                 Text(message)
-                    .font(.callout)
+                    .font(Theme.ui(12))
                     .fixedSize(horizontal: false, vertical: true)
                 Button(buttonTitle, action: action)
                     .buttonStyle(SoftPillButtonStyle(tint: tint))
@@ -244,12 +290,12 @@ struct FocusView: View {
             ZStack {
                 Circle().fill(Theme.dangerSoft).frame(width: 38, height: 38)
                 Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Theme.ui(15, .semibold))
                     .foregroundStyle(Theme.danger)
             }
             VStack(alignment: .leading, spacing: 10) {
                 Text("The blocking helper stopped responding for over 10 minutes, so this locked session's local timer was cleared automatically. Websites may still be blocked until the helper is back — use \u{201C}Update Helper\u{201D} above if it reappears, or check Website Shield below.")
-                    .font(.callout)
+                    .font(Theme.ui(12))
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Dismiss") { timer.acknowledgeHelperStuckWarning() }
                     .buttonStyle(SoftPillButtonStyle(tint: Theme.danger))
@@ -284,18 +330,18 @@ struct FocusView: View {
             )) {
                 HStack(spacing: 12) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(model.isBlocking ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Theme.surfaceLow))
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(model.isBlocking ? Theme.accentFill : Theme.surfaceLow)
                             .frame(width: 36, height: 36)
                         Image(systemName: model.isBlocking ? "shield.fill" : "shield")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(Theme.ui(15, .semibold))
                             .foregroundStyle(model.isBlocking ? .white : .secondary)
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Block distracting websites")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(Theme.ui(15, .semibold))
                         Text(shieldSubtitle)
-                            .font(.caption)
+                            .font(Theme.ui(10))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -307,13 +353,16 @@ struct FocusView: View {
 
             if model.groups.isEmpty {
                 Text("No lists yet — make one and add the sites that distract you.")
-                    .font(.callout)
+                    .font(Theme.ui(12))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 12)
             } else {
-                VStack(spacing: 10) {
-                    ForEach(model.groups) { group in
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(model.groups.enumerated()), id: \.element.id) { index, group in
+                        if index > 0 {
+                            Divider().overlay(Theme.stroke)
+                        }
                         groupRow(group)
                     }
                 }
@@ -376,14 +425,14 @@ struct FocusView: View {
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(Theme.ui(9, .semibold))
                             .foregroundStyle(.secondary)
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
                         Text(group.name)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(Theme.ui(14, .semibold))
                             .foregroundStyle(group.isEnabled ? .primary : .secondary)
                         Text("\(group.domains.count)")
-                            .font(.caption2.weight(.semibold))
+                            .font(Theme.ui(10, .semibold))
                             .foregroundStyle(.tertiary)
                     }
                     .contentShape(Rectangle())
@@ -401,7 +450,7 @@ struct FocusView: View {
                     Button("Delete List", role: .destructive) { deletingGroup = group }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(Theme.ui(11, .semibold))
                         .foregroundStyle(.secondary)
                 }
                 .menuStyle(.borderlessButton)
@@ -435,12 +484,12 @@ struct FocusView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
+                .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.stroke, lineWidth: 1))
 
                 if group.domains.isEmpty {
                     Text("No websites in this list yet.")
-                        .font(.callout)
+                        .font(Theme.ui(12))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.vertical, 8)
@@ -455,11 +504,8 @@ struct FocusView: View {
                 }
             }
         }
-        .padding(12)
-        .background(Theme.surfaceLow.opacity(group.isEnabled ? 1 : 0.5),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Theme.stroke, lineWidth: 1))
+        .padding(.vertical, 11)
+        .opacity(group.isEnabled ? 1 : 0.55)
     }
 
     private var shieldSubtitle: String {
@@ -486,9 +532,9 @@ struct FocusView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Blocked apps")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.ui(15, .semibold))
                     Text("Quit automatically whenever blocking is on. StudyBlock has to be running to enforce this.")
-                        .font(.caption)
+                        .font(Theme.ui(10))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -502,13 +548,13 @@ struct FocusView: View {
 
             if let error = appBlocker.lastError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .font(Theme.ui(10))
                     .foregroundStyle(Theme.danger)
             }
 
             if appBlocker.apps.isEmpty {
                 Text("No apps yet — add games, Discord, or whatever eats your study time.")
-                    .font(.callout)
+                    .font(Theme.ui(12))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 12)
@@ -519,16 +565,16 @@ struct FocusView: View {
                             Image(systemName: "app.dashed")
                                 .foregroundStyle(Theme.accent)
                             Text(app.name)
-                                .font(.callout.weight(.medium))
+                                .font(Theme.ui(12, .medium))
                             Text(app.bundleID)
-                                .font(.caption)
+                                .font(Theme.ui(10))
                                 .foregroundStyle(.tertiary)
                             Spacer()
                             Button {
                                 appBlocker.remove(app)
                             } label: {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 10, weight: .bold))
+                                    .font(Theme.ui(10, .semibold))
                             }
                             .buttonStyle(IconButtonStyle())
                             .help("Remove \(app.name)")
@@ -540,7 +586,7 @@ struct FocusView: View {
                         }
                     }
                 }
-                .background(Theme.surfaceLow.opacity(0.6), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .background(Theme.surfaceLow.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
         }
         .card()
@@ -568,10 +614,10 @@ private struct DomainChip: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(domain)
-                .font(.callout.weight(.medium))
+                .font(Theme.ui(12, .medium))
             Button(action: onRemove) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(Theme.ui(8, .semibold))
                     .foregroundStyle(hovering ? Theme.danger : .secondary)
             }
             .buttonStyle(.plain)
@@ -579,8 +625,9 @@ private struct DomainChip: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(hovering ? Theme.accentSoft : Theme.surfaceLow, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.stroke, lineWidth: 1))
+        .background(hovering ? Theme.accentSoft : Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .strokeBorder(Theme.stroke, lineWidth: 1))
         .animation(.easeOut(duration: 0.12), value: hovering)
         .onHover { hovering = $0 }
     }

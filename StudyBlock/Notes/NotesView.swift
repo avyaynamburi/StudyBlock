@@ -54,7 +54,7 @@ struct NotesView: View {
                     set: { store.notes[index].title = $0; store.touch(id) }
                 ))
                 .textFieldStyle(.plain)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .font(Theme.ui(20, .semibold))
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 6)
@@ -65,7 +65,7 @@ struct NotesView: View {
                     get: { store.notes[index].body },
                     set: { store.notes[index].body = $0; store.touch(id) }
                 ))
-                .font(.system(size: 13.5))
+                .font(Theme.ui(13.5))
                 .lineSpacing(3)
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 15)
@@ -92,22 +92,22 @@ private struct NoteRailItem: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(note.displayTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.ui(13, .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text(note.updatedAt, format: .relative(presentation: .named))
-                    .font(.caption2)
+                    .font(Theme.ui(10))
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(11)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(isSelected ? Theme.surface : (hovering ? Theme.surfaceLow.opacity(0.7) : .clear))
             )
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(isSelected ? Theme.stroke : .clear, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
         .animation(.easeOut(duration: 0.12), value: hovering)

@@ -17,8 +17,20 @@ final class TaskStore: ObservableObject {
     init() {
         items = JSONStore.load([TodoItem].self, from: "tasks.json") ?? []
         courseHues = JSONStore.load([String: Double].self, from: "courseColors.json") ?? [:]
+        dropDuplicateIDs()
         migrateLegacySeries()
         recomputeAutoColumns()
+    }
+
+    /// Two tasks sharing an id is unrecoverable for the board — `ForEach`
+    /// needs them unique, and a lookup by id would reach whichever came
+    /// first — so any repeat is dropped at load. Nothing should produce one;
+    /// this is a floor under the bugs that would.
+    private func dropDuplicateIDs() {
+        var seen = Set<UUID>()
+        let deduplicated = items.filter { seen.insert($0.id).inserted }
+        guard deduplicated.count != items.count else { return }
+        items = deduplicated
     }
 
     /// Recurring tasks used to be stored as a *single* live task that rolled
@@ -144,51 +156,55 @@ final class TaskStore: ObservableObject {
 
     func quickAdd(_ input: String, courseOverride: String? = nil) {
         let parsed = QuickAddParser.parse(input)
-        guard !parsed.title.isEmpty else { return }
-        var task = TodoItem(title: parsed.title, course: parsed.course ?? courseOverride,
-                             dueDate: parsed.dueDate, priority: parsed.priority)
-        task.column = defaultColumn(for: task.dueDate)
-        task.manualOrder = TodoItem.dateOrderValue(for: task.dueDate)
-        items.append(task)
+        add(title: parsed.title, course: parsed.course ?? courseOverride, dueDate: parsed.dueDate)
     }
 
-    /// Creates a recurring task by materialising it: every occurrence becomes
-    /// a real, independent task on the board sharing one `seriesID`. A series
+    /// Creates a task from the editor — the one entry point for both kinds.
+    /// With a repeat rule set it's materialised: every occurrence becomes a
+    /// real, independent task on the board sharing one `seriesID`. A series
     /// with an end date is expanded in full (up to `RepeatRule.maxCount`); a
     /// perpetual one gets `RepeatRule.perpetualCount` occurrences of runway,
     /// which `topUpSeries` extends as they're completed.
+    ///
+    /// Returns how many tasks actually landed on the board.
     @discardableResult
-    func addRecurring(title: String, course: String?, dueDate: Date, priority: TaskPriority,
-                      repeatRule: RepeatRule, repeatWeekdays: Set<Int>, repeatInterval: Int = 1,
-                      seriesEndDate: Date? = nil, notes: String = "") -> Int {
+    func add(title: String, notes: String = "", course: String? = nil, dueDate: Date? = nil,
+             repeatRule: RepeatRule = .none, repeatWeekdays: Set<Int> = [],
+             repeatInterval: Int = 1, seriesEndDate: Date? = nil) -> Int {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return 0 }
 
         var template = TodoItem(title: trimmed, notes: notes, course: course, dueDate: dueDate,
-                                priority: priority, repeatRule: repeatRule,
-                                repeatWeekdays: repeatWeekdays)
+                                repeatRule: repeatRule, repeatWeekdays: repeatWeekdays)
         template.repeatInterval = repeatInterval
-        template.seriesID = UUID()
         template.seriesEndDate = seriesEndDate
 
-        guard repeatRule != .none else {
-            // "Never" isn't a series — fall back to a single plain task.
-            template.seriesID = nil
+        // A repeat rule counts from a start date, so an undated task is a
+        // single plain card no matter which rule came in.
+        guard repeatRule != .none, let dueDate else {
+            template.repeatRule = .none
+            template.repeatWeekdays = []
+            template.repeatInterval = 1
+            template.seriesEndDate = nil
             template.column = defaultColumn(for: dueDate)
             template.manualOrder = TodoItem.dateOrderValue(for: dueDate)
             items.append(template)
             return 1
         }
 
+        template.seriesID = UUID()
         let created = template.materializedSeries(from: dueDate)
+        // A rule that yields no dates (an end date on or before the start)
+        // would otherwise swallow the task whole.
+        guard !created.isEmpty else { return 0 }
         items.append(contentsOf: created)
         return created.count
     }
 
     /// Saves an edit to a single task. Turning on a repeat rule for a task
     /// that isn't already part of a series promotes it into one, replacing
-    /// the single card with the whole materialised run — the same thing the
-    /// Recurring Task sheet would have produced.
+    /// the single card with the whole materialised run — the same thing
+    /// checking "Repeats" in the task editor asks for.
     @discardableResult
     func update(_ item: TodoItem) -> Int {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return 0 }
@@ -198,13 +214,35 @@ final class TaskStore: ObservableObject {
             var template = item
             template.seriesID = UUID()
             let created = template.materializedSeries(from: due)
-            guard !created.isEmpty else { return 0 }
+            guard !created.isEmpty else {
+                // The rule produced no dates (an end date on or before the
+                // start). Keep the task, but drop the repeat rule: a task
+                // carrying a rule with no series id is exactly what
+                // `migrateLegacySeries` expands on the next launch, so leaving
+                // it would turn one card into a whole series behind the
+                // user's back.
+                var plain = item
+                plain.repeatRule = .none
+                plain.repeatWeekdays = []
+                plain.repeatInterval = 1
+                plain.seriesEndDate = nil
+                items[index] = plain
+                return 0
+            }
             items.remove(at: index)
             items.append(contentsOf: created)
             return created.count
         }
 
         var updated = item
+        // An occurrence saved without a repeat rule is no longer part of the
+        // schedule — it's a one-off pulled out of the series. Cutting the link
+        // now keeps a later "edit/delete the whole series" from sweeping it up,
+        // and matches what `migrateLegacySeries` does to that shape on load.
+        if updated.repeatRule == .none, !updated.isCompleted {
+            updated.seriesID = nil
+            updated.seriesEndDate = nil
+        }
         if !updated.isCompleted, !updated.columnIsManual {
             updated.column = defaultColumn(for: updated.dueDate)
         }
@@ -227,16 +265,19 @@ final class TaskStore: ObservableObject {
     /// every pending one is replaced by a freshly materialised run from the
     /// new start date, so changing the schedule reshapes the future without
     /// rewriting the past.
-    func updateSeries(seriesID: UUID, title: String, course: String?, dueDate: Date,
-                      priority: TaskPriority, repeatRule: RepeatRule, repeatWeekdays: Set<Int>,
-                      repeatInterval: Int = 1, seriesEndDate: Date?, notes: String? = nil) {
+    ///
+    /// Clearing the repeat rule (or the due date) collapses the run back into
+    /// a single plain task, which is what unchecking "Repeats" in the editor
+    /// means.
+    func updateSeries(seriesID: UUID, title: String, notes: String? = nil, course: String?,
+                      dueDate: Date?, repeatRule: RepeatRule, repeatWeekdays: Set<Int>,
+                      repeatInterval: Int = 1, seriesEndDate: Date?) {
         let members = items.filter { $0.seriesID == seriesID }
         guard let reference = members.first else { return }
 
         var template = reference
         template.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         template.course = course
-        template.priority = priority
         template.repeatRule = repeatRule
         template.repeatWeekdays = repeatWeekdays
         template.repeatInterval = repeatInterval
@@ -249,7 +290,6 @@ final class TaskStore: ObservableObject {
         for index in items.indices where items[index].seriesID == seriesID && items[index].isCompleted {
             items[index].title = template.title
             items[index].course = course
-            items[index].priority = priority
             items[index].repeatRule = repeatRule
             items[index].repeatWeekdays = repeatWeekdays
             items[index].repeatInterval = repeatInterval
@@ -257,8 +297,31 @@ final class TaskStore: ObservableObject {
             if let notes { items[index].notes = notes }
         }
 
+        let hadPending = members.contains { !$0.isCompleted }
         items.removeAll { $0.seriesID == seriesID && !$0.isCompleted }
-        guard repeatRule != .none else { return }
+
+        guard repeatRule != .none, let dueDate else {
+            // Repeats switched off: what was a run becomes one ordinary task.
+            // A series with nothing left to do has no future to collapse, so
+            // it just keeps its history rather than resurrecting a card.
+            guard hadPending else { return }
+            var single = template
+            single.id = UUID()
+            single.seriesID = nil
+            single.repeatRule = .none
+            single.repeatWeekdays = []
+            single.repeatInterval = 1
+            single.seriesEndDate = nil
+            single.dueDate = dueDate
+            single.isCompleted = false
+            single.completedAt = nil
+            single.column = defaultColumn(for: dueDate)
+            single.columnIsManual = false
+            single.manualOrder = TodoItem.dateOrderValue(for: dueDate)
+            items.append(single)
+            return
+        }
+
         items.append(contentsOf: template.materializedSeries(from: dueDate))
     }
 
@@ -345,13 +408,30 @@ final class TaskStore: ObservableObject {
         if let seriesID = task.seriesID { topUpSeries(seriesID) }
     }
 
-    /// Appends one more occurrence to the end of a perpetual series, so the
-    /// board always holds roughly `RepeatRule.perpetualCount` pending copies
-    /// no matter how many get completed. A series with an end date was
-    /// materialised in full up front and is deliberately left alone.
+    /// Whether a perpetual series needs another occurrence appended: only once
+    /// nothing is left to do in it.
+    ///
+    /// This used to fire on *every* completion, which is what let a single
+    /// checkbox breed. Completing a card appended a replacement; reopening it
+    /// handed the original back without withdrawing that replacement; so each
+    /// check/uncheck cycle left the series one card longer — one going to
+    /// Completed and a brand new one appearing in All Tasks, over and over.
+    ///
+    /// Running dry is the only threshold that can't do that. Any higher
+    /// low-water mark grows a series whose pending count already sits below
+    /// it, which is exactly the case for a series that reached the board with
+    /// only a card or two in the first place.
+    nonisolated static func needsRunwayTopUp(members: [TodoItem]) -> Bool {
+        !members.contains { !$0.isCompleted }
+    }
+
+    /// Appends one more occurrence to a perpetual series that has run out, so
+    /// it never dries up. A series with an end date was materialised in full
+    /// up front and is deliberately left alone.
     private func topUpSeries(_ seriesID: UUID, now: Date = Date(), calendar: Calendar = .current) {
         let members = seriesMembers(seriesID)
-        guard let template = members.last,
+        guard Self.needsRunwayTopUp(members: members),
+              let template = members.last,
               template.repeatRule != .none,
               template.seriesEndDate == nil,
               let start = members.first?.dueDate,
