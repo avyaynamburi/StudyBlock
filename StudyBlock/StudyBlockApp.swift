@@ -11,6 +11,7 @@ struct StudyBlockApp: App {
     @StateObject private var tasks = TaskStore()
     @StateObject private var decks = DeckStore()
     @StateObject private var notes = NotesStore()
+    @StateObject private var canvas = CanvasSync()
     @Environment(\.openWindow) private var openWindow
 
     init() {
@@ -36,6 +37,7 @@ struct StudyBlockApp: App {
                 .environmentObject(tasks)
                 .environmentObject(decks)
                 .environmentObject(notes)
+                .environmentObject(canvas)
         }
         .windowStyle(.hiddenTitleBar)
 

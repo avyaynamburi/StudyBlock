@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct TasksView: View {
     @EnvironmentObject private var store: TaskStore
     @EnvironmentObject private var timer: FocusTimerController
+    @EnvironmentObject private var canvas: CanvasSync
     @AppStorage("lockSessions") private var lockSessions = false
 
     @State private var quickAddText = ""
@@ -15,6 +16,7 @@ struct TasksView: View {
     @State private var confettiTrigger = 0
     @State private var csvMessage: CSVMessage?
     @State private var showingCSVSheet = false
+    @State private var showingCanvasSheet = false
     @FocusState private var quickAddFocused: Bool
 
     /// Result of an import/export, shown in an alert afterwards.
@@ -39,6 +41,7 @@ struct TasksView: View {
                 HStack(spacing: 10) {
                     CompletedCounterPill(count: store.completedCount)
                     sortButton
+                    canvasMenu
                     csvMenu
                     courseFilterMenu
                 }
@@ -52,6 +55,12 @@ struct TasksView: View {
         }
         .overlay { ScreenConfettiOverlay(trigger: confettiTrigger) }
         .onAppear { store.recomputeAutoColumns() }
+        // One pull per launch. `CanvasSync` holds the guard rather than this
+        // view, because `.task` re-runs every time the Tasks tab is selected.
+        .task { await canvas.syncOnLaunch(into: store) }
+        .sheet(isPresented: $showingCanvasSheet) {
+            CanvasSheet(canvas: canvas, canvasTaskCount: store.canvasCount) { runCanvasSync() }
+        }
         .sheet(item: $editorTarget) { target in
             TaskEditSheet(task: target.task, isNew: target.isNew, courses: store.courses,
                           seriesPendingCount: target.task.seriesID
@@ -277,6 +286,52 @@ struct TasksView: View {
         // vanished as soon as that column had anything in it.
         if after.column == .doing, before?.column != .doing, !timer.isRunning {
             timerPromptTask = after
+        }
+    }
+
+    // MARK: - Canvas
+
+    /// Clicking syncs; the menu holds the settings and the less-used
+    /// switches. A feed that isn't set up yet opens the sheet instead, since
+    /// there is nothing to sync.
+    private var canvasMenu: some View {
+        Menu {
+            Button("Sync Now") { runCanvasSync() }
+                .disabled(!canvas.isConfigured || canvas.isSyncing)
+            Button("Canvas Feed\u{2026}") { showingCanvasSheet = true }
+            Divider()
+            Text(canvas.lastSyncedLabel)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: canvas.isSyncing
+                      ? "arrow.triangle.2.circlepath" : "graduationcap")
+                    .font(Theme.ui(11, .semibold))
+                Text("Canvas")
+            }
+        } primaryAction: {
+            if canvas.isConfigured { runCanvasSync() } else { showingCanvasSheet = true }
+        }
+        .menuStyle(.button)
+        .buttonStyle(SoftPillButtonStyle(tint: canvas.lastError != nil ? Theme.danger : nil))
+        .fixedSize()
+        .disabled(canvas.isSyncing)
+        .help(canvas.isConfigured
+              ? "Pull assignments from Canvas \u{2014} \(canvas.lastSyncedLabel.lowercased())"
+              : "Set up your Canvas calendar feed")
+    }
+
+    private func runCanvasSync() {
+        Task {
+            let result = await canvas.sync(into: store)
+            switch result {
+            case .success(let summary):
+                // Silence is right for a launch sync that found nothing, but
+                // a sync the user asked for should always say what happened.
+                csvMessage = CSVMessage(title: summary.headline, detail: summary.detail)
+            case .failure(let error):
+                csvMessage = CSVMessage(title: "Canvas sync failed",
+                                        detail: error.localizedDescription)
+            }
         }
     }
 

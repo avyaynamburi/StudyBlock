@@ -344,6 +344,129 @@ final class TaskStore: ObservableObject {
         items.filter { $0.seriesID == seriesID && !$0.isCompleted }.count
     }
 
+    // MARK: - Canvas
+
+    /// The one category every imported assignment lands in, so Canvas work is
+    /// filterable as a group and visibly distinct from tasks you wrote.
+    static let canvasCategory = "Canvas"
+
+    struct CanvasSyncSummary: Equatable {
+        var added = 0
+        var updated = 0
+        var unchanged = 0
+        /// Feed entries that were course events, not assignments. Counted
+        /// rather than imported — a room booking isn't something to tick off.
+        var skippedEvents = 0
+
+        var headline: String {
+            var parts: [String] = []
+            if added > 0 { parts.append("\(added) added") }
+            if updated > 0 { parts.append("\(updated) updated") }
+            if parts.isEmpty { return "Already up to date" }
+            return parts.joined(separator: ", ")
+        }
+
+        var detail: String {
+            var lines: [String] = []
+            if unchanged > 0 {
+                lines.append("\(unchanged) assignment\(unchanged == 1 ? " was" : "s were") already on the board.")
+            }
+            if skippedEvents > 0 {
+                lines.append("Skipped \(skippedEvents) calendar event\(skippedEvents == 1 ? "" : "s") \u{2014} "
+                             + "only assignments are imported.")
+            }
+            return lines.joined(separator: " ")
+        }
+    }
+
+    /// Folds a fetched Canvas feed into the board.
+    ///
+    /// Identity is the feed's UID, which is what makes a re-sync idempotent:
+    /// an assignment already here is updated in place rather than duplicated.
+    /// The stored content hash is what separates "seen again" from "actually
+    /// changed", so a professor moving a deadline moves the card, while a
+    /// sync of an unchanged feed does nothing at all.
+    ///
+    /// Two things it deliberately never does: it never reopens a task you
+    /// have completed, and it never deletes a task that has dropped out of
+    /// the feed. Both would destroy your own work on the strength of a feed
+    /// Canvas only regenerates on a cache interval.
+    /// The category course events land in when `includeEvents` is on. Kept
+    /// separate from the assignment category so the feed's due/starts
+    /// distinction survives onto the board — an event is something that
+    /// starts, never something that is "due".
+    static let canvasEventCategory = "Canvas Events"
+
+    @discardableResult
+    func mergeCanvas(_ items: [CanvasItem], includeEvents: Bool = false,
+                     now: Date = Date(),
+                     calendar: Calendar = .current) -> CanvasSyncSummary {
+        var summary = CanvasSyncSummary()
+        // Built once per sync, so a feed of 300 assignments isn't a linear
+        // scan apiece.
+        var existing: [String: Int] = [:]
+        for (index, task) in self.items.enumerated() {
+            if let uid = task.canvasUID { existing[uid] = index }
+        }
+
+        for item in items {
+            guard item.kind == .assignment || includeEvents else {
+                summary.skippedEvents += 1
+                continue
+            }
+            guard let when = item.when,
+                  let due = CanvasNormalizer.localDueDate(when, calendar: calendar) else { continue }
+            let category = item.kind == .assignment ? Self.canvasCategory : Self.canvasEventCategory
+
+            guard let index = existing[item.sourceID] else {
+                var task = TodoItem(title: item.qualifiedTitle,
+                                    course: category,
+                                    dueDate: due)
+                task.canvasUID = item.sourceID
+                task.canvasHash = item.contentHash
+                task.column = defaultColumn(for: due, now: now, calendar: calendar)
+                task.manualOrder = TodoItem.dateOrderValue(for: due)
+                self.items.append(task)
+                summary.added += 1
+                continue
+            }
+
+            guard self.items[index].canvasHash != item.contentHash else {
+                summary.unchanged += 1
+                continue
+            }
+
+            var task = self.items[index]
+            let previousDue = task.dueDate
+            task.title = item.qualifiedTitle
+            task.course = category
+            task.dueDate = due
+            task.canvasHash = item.contentHash
+            // A completed assignment stays completed even when its deadline
+            // moves; the hash is still refreshed so it stops re-reporting.
+            if !task.isCompleted {
+                if !task.columnIsManual {
+                    task.column = defaultColumn(for: due, now: now, calendar: calendar)
+                }
+                // The same rule the task editor uses: a card the user dragged
+                // into a particular spot keeps it, because that mismatch is
+                // the only record that the placement was deliberate.
+                if previousDue != due,
+                   task.manualOrder == TodoItem.dateOrderValue(for: previousDue) {
+                    task.manualOrder = TodoItem.dateOrderValue(for: due)
+                }
+            }
+            self.items[index] = task
+            summary.updated += 1
+        }
+        return summary
+    }
+
+    /// How many tasks on the board came from Canvas.
+    var canvasCount: Int {
+        items.filter(\.isFromCanvas).count
+    }
+
     func delete(_ item: TodoItem) {
         items.removeAll { $0.id == item.id }
     }

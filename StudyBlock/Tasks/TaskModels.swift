@@ -225,6 +225,18 @@ struct TodoItem: Identifiable, Codable, Equatable {
     /// perpetuity, which is topped back up as its occurrences get completed.
     /// Only meaningful alongside a non-`none` `repeatRule`.
     var seriesEndDate: Date?
+    /// The Canvas feed entry this task was imported from (its ICS `UID`), or
+    /// nil for anything created by hand. This is the whole basis for
+    /// recognising an assignment across syncs, so it must stay stable.
+    ///
+    /// Optional for the same reason `repeatEvery` is: `JSONStore` turns a
+    /// decode failure into an empty board, so a *non*-optional new field
+    /// would silently erase every task saved before this existed.
+    var canvasUID: String?
+    /// Hash of the Canvas content as of the last sync. A differing hash on a
+    /// later sync is what marks an assignment as genuinely changed — a moved
+    /// deadline above all — rather than merely seen again.
+    var canvasHash: String?
     var column: TaskColumn = .backlog
     /// Once true, automatic due-date-driven column promotion leaves this
     /// task alone — the user (drag, or the completion checkbox) is in charge.
@@ -249,6 +261,9 @@ struct TodoItem: Identifiable, Codable, Equatable {
 
     /// True for a task that is one occurrence of a recurring series.
     var isRecurring: Bool { seriesID != nil && repeatRule != .none }
+
+    /// True for a task that came from Canvas rather than from the user.
+    var isFromCanvas: Bool { canvasUID != nil }
 
     /// Expands this task, used as a template, into one real task per
     /// occurrence of its series — the "recurring tasks are literally

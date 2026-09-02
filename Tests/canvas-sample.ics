@@ -1,0 +1,51 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Instructure//Canvas//EN
+BEGIN:VEVENT
+DTSTART:20991201T235900Z
+SUMMARY:Problem Set 5 [PHYS 221]
+UID:event-assignment-2@canvas.case.edu
+URL:https://canvas.case.edu/courses/2/assignments/2
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20991215
+SUMMARY:Reading Day
+UID:event-calendar-3@canvas.case.edu
+URL:https://canvas.case.edu/calendar?event_id=3
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20991203T045900Z
+SUMMARY:Essay on the Reformation\, draft one\; with sources [HIST 10
+ 1]
+UID:event-assignment-9@canvas.case.edu
+URL:https://canvas.case.edu/courses/9/assignments/9
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20991204T235900Z
+SUMMARY:Lab 3 [revised] handout [CHEM 101]
+UID:event-assignment-11@canvas.case.edu
+URL:https://canvas.case.edu/courses/11/assignments/11
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20991220
+SUMMARY:Portfolio upload [ART 200]
+UID:event-assignment-14@canvas.case.edu
+URL:https://canvas.case.edu/courses/14/assignments/14
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20991205T235900Z
+SUMMARY:Quiz 2 [MATH 201]
+URL:https://canvas.case.edu/courses/4/assignments/4
+END:VEVENT
+BEGIN:VEVENT
+SUMMARY:Undated placeholder [PHYS 221]
+UID:event-assignment-99@canvas.case.edu
+URL:https://canvas.case.edu/courses/2/assignments/99
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20200101T235900Z
+SUMMARY:Ancient homework [HIST 101]
+UID:event-assignment-1@canvas.case.edu
+URL:https://canvas.case.edu/courses/9/assignments/1
+END:VEVENT
+END:VCALENDAR
