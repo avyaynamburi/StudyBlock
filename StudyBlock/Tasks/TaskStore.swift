@@ -467,6 +467,24 @@ final class TaskStore: ObservableObject {
         items.filter(\.isFromCanvas).count
     }
 
+    // MARK: - Merging
+
+    /// Folds two cards into one: the survivor is rewritten with the merged
+    /// fields and the absorbed card is removed.
+    ///
+    /// Because the merged card inherits the Canvas UID, a later sync matches
+    /// it by identity and updates it in place — which is what stops the
+    /// duplicate coming straight back on the next pull.
+    @discardableResult
+    func applyMerge(_ plan: TaskMergePlan) -> TodoItem? {
+        guard let index = items.firstIndex(where: { $0.id == plan.primary.id }),
+              items.contains(where: { $0.id == plan.secondary.id }) else { return nil }
+        let merged = plan.merged()
+        items[index] = merged
+        items.removeAll { $0.id == plan.secondary.id }
+        return merged
+    }
+
     func delete(_ item: TodoItem) {
         items.removeAll { $0.id == item.id }
     }

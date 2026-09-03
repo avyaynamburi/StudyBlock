@@ -17,6 +17,8 @@ struct TasksView: View {
     @State private var csvMessage: CSVMessage?
     @State private var showingCSVSheet = false
     @State private var showingCanvasSheet = false
+    @State private var merging: MergeTarget?
+    @State private var mergeRefusal: String?
     @FocusState private var quickAddFocused: Bool
 
     /// Result of an import/export, shown in an alert afterwards.
@@ -24,6 +26,14 @@ struct TasksView: View {
         let id = UUID()
         let title: String
         let detail: String
+    }
+
+    /// A merge in progress. `partner` is set when one card was dropped onto
+    /// another; nil when the context menu opened the picker instead.
+    private struct MergeTarget: Identifiable {
+        let id = UUID()
+        let primary: TodoItem
+        var partner: TodoItem?
     }
 
     /// What the task editor is open on — an existing card, or a blank draft
@@ -58,6 +68,20 @@ struct TasksView: View {
         // One pull per launch. `CanvasSync` holds the guard rather than this
         // view, because `.task` re-runs every time the Tasks tab is selected.
         .task { await canvas.syncOnLaunch(into: store) }
+        .sheet(item: $merging) { target in
+            TaskMergeSheet(primary: target.primary, partner: target.partner,
+                           candidates: store.items,
+                           courseColor: { store.color(for: $0) }) { plan in
+                store.applyMerge(plan)
+            }
+        }
+        .alert("Can\u{2019}t merge these", isPresented: Binding(
+            get: { mergeRefusal != nil }, set: { if !$0 { mergeRefusal = nil } })
+        ) {
+            Button("OK") { mergeRefusal = nil }
+        } message: {
+            Text(mergeRefusal ?? "")
+        }
         .sheet(isPresented: $showingCanvasSheet) {
             CanvasSheet(canvas: canvas, canvasTaskCount: store.canvasCount) { runCanvasSync() }
         }
@@ -170,7 +194,9 @@ struct TasksView: View {
                                 onSelect: { openEditor(for: $0) },
                                 onDrop: { id in handleDrop(id: id, column: column) },
                                 onReorder: { id, targetID in handleReorder(id: id, before: targetID) },
-                                onMove: { id, target in handleDrop(id: id, column: target) })
+                                onMove: { id, target in handleDrop(id: id, column: target) },
+                                onMergeDrop: { id, targetID in beginMerge(id: id, into: targetID) },
+                                onMergePick: { task in beginMerge(from: task) })
                         .frame(width: 250)
                         .padding(.horizontal, 12)
                 }
@@ -253,6 +279,30 @@ struct TasksView: View {
                 title: "Created \(created) task\(created == 1 ? "" : "s")",
                 detail: "Each one is its own task you can complete, edit, or drag independently.")
         }
+    }
+
+    // MARK: - Merging
+
+    /// A card was option-dropped onto another. The sheet always opens — a
+    /// merge is never applied straight from the gesture.
+    private func beginMerge(id: UUID, into targetID: UUID) {
+        guard let dropped = store.items.first(where: { $0.id == id }),
+              let target = store.items.first(where: { $0.id == targetID }) else { return }
+        if let refusal = TaskMergePlan.refusal(target, dropped) {
+            mergeRefusal = refusal
+            return
+        }
+        merging = MergeTarget(primary: target, partner: dropped)
+    }
+
+    /// The context-menu route: the same sheet, opened on its picker because
+    /// there is no second card yet.
+    private func beginMerge(from task: TodoItem) {
+        guard !task.isRecurring else {
+            mergeRefusal = TaskMergePlan.recurringRefusal
+            return
+        }
+        merging = MergeTarget(primary: task, partner: nil)
     }
 
     private func handleToggle(_ task: TodoItem) {
@@ -779,6 +829,8 @@ private struct BoardColumn: View {
     let onDrop: (UUID) -> Void
     let onReorder: (_ id: UUID, _ targetID: UUID) -> Void
     let onMove: (_ id: UUID, _ target: TaskColumn) -> Void
+    let onMergeDrop: (_ id: UUID, _ targetID: UUID) -> Void
+    let onMergePick: (TodoItem) -> Void
 
     @State private var isTargeted = false
 
@@ -812,7 +864,9 @@ private struct BoardColumn: View {
                                  onFocus: timerRunning ? nil : { onFocus(task) },
                                  onReorder: { droppedID in onReorder(droppedID, task.id) },
                                  onSelect: { onSelect(task) },
-                                 onMove: { target in onMove(task.id, target) })
+                                 onMove: { target in onMove(task.id, target) },
+                                 onMergeDrop: { droppedID in onMergeDrop(droppedID, task.id) },
+                                 onMergePick: { onMergePick(task) })
                     }
                     if tasks.isEmpty {
                         Text(emptyMessage)
@@ -851,7 +905,7 @@ private struct BoardColumn: View {
 
 // MARK: - Task card
 
-private struct TaskCard: View {
+struct TaskCard: View {
     let task: TodoItem
     let column: TaskColumn
     let showFocusButton: Bool
@@ -861,9 +915,19 @@ private struct TaskCard: View {
     var onReorder: ((UUID) -> Void)?
     var onSelect: (() -> Void)?
     var onMove: ((TaskColumn) -> Void)?
+    /// A card was dropped here with Option held: fold the two together
+    /// instead of repositioning.
+    var onMergeDrop: ((UUID) -> Void)?
+    /// "Merge with" from the context menu, which opens the picker instead of
+    /// needing a drag at all.
+    var onMergePick: (() -> Void)?
 
     @State private var hovering = false
     @State private var isDropTargeted = false
+    /// Whether Option was down when the drag arrived over this card. Read at
+    /// that moment rather than tracked continuously — it only has to be right
+    /// often enough to colour the drop line.
+    @State private var mergeHint = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -982,7 +1046,7 @@ private struct TaskCard: View {
         .overlay(alignment: .top) {
             if isDropTargeted {
                 Capsule()
-                    .fill(Theme.accent)
+                    .fill(mergeHint ? Theme.success : Theme.accent)
                     .frame(height: 3)
                     .padding(.horizontal, 4)
                     .offset(y: -6)
@@ -990,6 +1054,9 @@ private struct TaskCard: View {
         }
         .contextMenu {
             Button("Edit Task\u{2026}") { onSelect?() }
+            if let onMergePick {
+                Button("Merge With\u{2026}", action: onMergePick)
+            }
             Button(task.isCompleted ? "Mark Incomplete" : "Mark Complete", action: onToggle)
             if let onFocus, showFocusButton {
                 Button("Start Focus Session", action: onFocus)
@@ -1011,11 +1078,20 @@ private struct TaskCard: View {
         .animation(.easeOut(duration: 0.12), value: hovering)
         .animation(.easeOut(duration: 0.1), value: isDropTargeted)
         .dropDestination(for: String.self) { droppedItems, _ in
-            guard let onReorder, let idString = droppedItems.first, let id = UUID(uuidString: idString) else { return false }
+            guard let idString = droppedItems.first, let id = UUID(uuidString: idString) else { return false }
+            // Option turns a drop from "put it here" into "these are the same
+            // task". Read at the drop itself, from the keyboard rather than
+            // from hover state that may have gone stale.
+            if NSEvent.modifierFlags.contains(.option), let onMergeDrop {
+                onMergeDrop(id)
+                return true
+            }
+            guard let onReorder else { return false }
             onReorder(id)
             return true
         } isTargeted: { targeted in
             isDropTargeted = targeted
+            mergeHint = targeted && NSEvent.modifierFlags.contains(.option)
         }
     }
 
