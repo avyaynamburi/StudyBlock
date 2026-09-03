@@ -196,6 +196,14 @@ struct TaskMergeSheet: View {
                             .strokeBorder(Theme.stroke, lineWidth: 1))
                 }
 
+                if current.detachesFromSeries {
+                    Label("This card leaves its repeating series and becomes a single task. "
+                          + "The other occurrences carry on untouched.",
+                          systemImage: "repeat.circle")
+                        .font(Theme.ui(10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if current.canvasSide != nil {
                     Label("Keeps the Canvas link, so future syncs update this card instead of "
                           + "importing the duplicate again.", systemImage: "link")

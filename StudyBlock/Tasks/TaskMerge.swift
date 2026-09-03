@@ -134,6 +134,22 @@ struct TaskMergePlan: Equatable {
             result.canvasUID = source.canvasUID
             result.canvasHash = source.canvasHash
         }
+        // A merged occurrence leaves its series. The rest of the run is
+        // untouched, but this card can't stay a member: `updateSeries`
+        // rebuilds every pending occurrence from scratch, which would throw
+        // the merge away the next time the series was edited.
+        //
+        // Clearing the rule matters as much as clearing the id. A pending
+        // task carrying a repeat rule with no series id is exactly the shape
+        // `migrateLegacySeries` expands on the next launch — leaving it would
+        // turn this one card into a whole new series behind the user's back.
+        if result.seriesID != nil {
+            result.seriesID = nil
+            result.repeatRule = .none
+            result.repeatWeekdays = []
+            result.repeatInterval = 1
+            result.seriesEndDate = nil
+        }
         // A due date that changed has to move the card, unless it was dragged
         // somewhere deliberately — the same rule the task editor follows.
         if result.dueDate != primary.dueDate,
@@ -145,16 +161,14 @@ struct TaskMergePlan: Equatable {
 
     /// Why a pair can't be merged, or nil when it can.
     ///
-    /// Occurrences of a recurring series are refused: one of them is a copy
-    /// among a hundred, and folding another task into it raises questions
-    /// about the other ninety-nine that this feature has no answer for.
+    /// An occurrence of a recurring series is fair game: only that one card
+    /// is folded in, and `merged()` detaches it so the other occurrences
+    /// carry on exactly as they were.
     static func refusal(_ a: TodoItem, _ b: TodoItem) -> String? {
-        guard a.id != b.id else { return "That\u{2019}s the same task." }
-        if a.isRecurring || b.isRecurring { return recurringRefusal }
-        return nil
+        a.id == b.id ? "That\u{2019}s the same task." : nil
     }
 
-    static let recurringRefusal =
-        "Repeating tasks can\u{2019}t be merged \u{2014} an occurrence is one copy of a whole "
-        + "series. Turn off Repeats first if you want to merge this one."
+    /// True when merging will pull the surviving card out of a repeating
+    /// series, which the sheet says out loud before anything happens.
+    var detachesFromSeries: Bool { primary.seriesID != nil }
 }

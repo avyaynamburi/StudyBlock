@@ -40,7 +40,14 @@ struct TaskMergeTests {
         return t
     }
 
+    @MainActor
     static func main() {
+        // Touches a real TaskStore below, which writes through JSONStore.
+        guard NSHomeDirectory().contains("mp-sandbox") else {
+            print("refusing to run outside the sandbox HOME — got \(NSHomeDirectory())")
+            exit(2)
+        }
+
         print("\nhand-made + Canvas: the four rules")
         let user = mine("CSDS330 homework 1", notes: "start with the reading")
         let canvas = fromCanvas("CSDS 330: HW1")
@@ -100,11 +107,32 @@ struct TaskMergeTests {
         equal(plan.resolvedTitle, "CSDS 330: HW1", "the title choice can be flipped")
         equal(plan.resolvedCourse, TaskStore.canvasCategory, "so can the category")
 
-        print("\nwhat can't be merged")
+        print("\nmerging one occurrence of a series")
         var series = mine("Discussion post")
         series.seriesID = UUID()
         series.repeatRule = .weekly
-        check(TaskMergePlan.refusal(series, canvas) != nil, "a recurring occurrence is refused")
+        series.repeatWeekdays = [3]
+        series.repeatInterval = 2
+        series.seriesEndDate = friday
+        check(TaskMergePlan.refusal(series, canvas) == nil, "a recurring occurrence is allowed")
+
+        let seriesPlan = TaskMergePlan.autofilled(series, canvas)
+        check(seriesPlan.detachesFromSeries, "the sheet is told it will leave the series")
+        let detached = seriesPlan.merged()
+        equal(detached.seriesID, nil, "the merged card leaves the series")
+        equal(detached.repeatRule, RepeatRule.none, "and drops the repeat rule with it")
+        equal(detached.repeatWeekdays, [], "weekdays cleared")
+        equal(detached.repeatInterval, 1, "interval reset")
+        equal(detached.seriesEndDate, nil, "end date cleared")
+        check(!detached.isRecurring, "so it is no longer an occurrence of anything")
+        // A pending task holding a repeat rule with no series id is the exact
+        // shape migrateLegacySeries expands on the next launch. Clearing the
+        // id alone would breed a whole new series from this one card.
+        check(!(detached.seriesID == nil && detached.repeatRule != .none && !detached.isCompleted),
+              "it cannot be re-expanded into a new series at next launch")
+        equal(detached.canvasUID, canvas.canvasUID, "and it still inherits the Canvas link")
+
+        print("\nwhat still can't be merged")
         check(TaskMergePlan.refusal(user, user) != nil, "a task can't merge with itself")
         check(TaskMergePlan.refusal(user, canvas) == nil, "an ordinary pair is allowed")
 
@@ -116,6 +144,30 @@ struct TaskMergeTests {
         check(same.titlesAgree && same.duesAgree && same.coursesAgree,
               "identical fields are reported as agreeing, so no choice is shown")
         check(!plan.titlesAgree, "differing fields are reported as differing")
+
+        print("\napplied to a real board")
+        let store = TaskStore()
+        store.items.removeAll()
+        let created = store.add(title: "Discussion post", course: "HIST101",
+                                dueDate: friday, repeatRule: .weekly, repeatInterval: 1)
+        check(created > 1, "a series was materialised", "created \(created)")
+        store.add(title: "hist discussion wk1", course: "HIST101", dueDate: friday)
+
+        let occurrence = store.items.first { $0.isRecurring }!
+        let seriesID = occurrence.seriesID!
+        let siblingsBefore = store.pendingCount(inSeries: seriesID)
+        let standalone = store.items.first { !$0.isRecurring }!
+
+        let applied = store.applyMerge(TaskMergePlan.autofilled(occurrence, standalone))
+        check(applied != nil, "the merge applied")
+        equal(store.items.contains { $0.id == standalone.id }, false, "the absorbed card is gone")
+        let survivor = store.items.first { $0.id == occurrence.id }
+        check(survivor != nil, "the survivor is still on the board")
+        equal(survivor?.seriesID, nil, "and has left the series")
+        equal(store.pendingCount(inSeries: seriesID), siblingsBefore - 1,
+              "the series lost exactly the one occurrence, and nothing else")
+        check(store.items.filter { $0.seriesID == seriesID }.allSatisfy { $0.isRecurring },
+              "every remaining occurrence is still a proper series member")
 
         print("\n\(checks - failures)/\(checks) checks passed")
         exit(failures == 0 ? 0 : 1)

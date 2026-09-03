@@ -298,10 +298,6 @@ struct TasksView: View {
     /// The context-menu route: the same sheet, opened on its picker because
     /// there is no second card yet.
     private func beginMerge(from task: TodoItem) {
-        guard !task.isRecurring else {
-            mergeRefusal = TaskMergePlan.recurringRefusal
-            return
-        }
         merging = MergeTarget(primary: task, partner: nil)
     }
 
@@ -923,11 +919,12 @@ struct TaskCard: View {
     var onMergePick: (() -> Void)?
 
     @State private var hovering = false
-    @State private var isDropTargeted = false
-    /// Whether Option was down when the drag arrived over this card. Read at
-    /// that moment rather than tracked continuously — it only has to be right
-    /// often enough to colour the drop line.
-    @State private var mergeHint = false
+    /// A card is hovering over this one's body: dropping folds the two into
+    /// one.
+    @State private var mergeTargeted = false
+    /// A card is hovering over the thin strip along the top edge: dropping
+    /// puts it in front of this one instead.
+    @State private var reorderTargeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -1044,13 +1041,28 @@ struct TaskCard: View {
         // slide down 5pt to open a gap, which moved it out from under the
         // pointer, cleared `isTargeted`, moved it back, and oscillated.
         .overlay(alignment: .top) {
-            if isDropTargeted {
+            if reorderTargeted {
                 Capsule()
-                    .fill(mergeHint ? Theme.success : Theme.accent)
+                    .fill(Theme.accent)
                     .frame(height: 3)
                     .padding(.horizontal, 4)
                     .offset(y: -6)
             }
+        }
+        // Dropping onto the card itself merges, so reordering keeps a strip
+        // of its own along the top edge — the place you already aim for when
+        // putting one card in front of another. It sits above the card's own
+        // drop area, so it wins inside its own band.
+        .overlay(alignment: .top) {
+            Color.clear
+                .frame(height: 13)
+                .contentShape(Rectangle())
+                .dropDestination(for: String.self) { droppedItems, _ in
+                    guard let onReorder, let idString = droppedItems.first,
+                          let id = UUID(uuidString: idString) else { return false }
+                    onReorder(id)
+                    return true
+                } isTargeted: { reorderTargeted = $0 }
         }
         .contextMenu {
             Button("Edit Task\u{2026}") { onSelect?() }
@@ -1076,23 +1088,14 @@ struct TaskCard: View {
         }
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)
-        .animation(.easeOut(duration: 0.1), value: isDropTargeted)
+        .animation(.easeOut(duration: 0.1), value: mergeTargeted)
+        .animation(.easeOut(duration: 0.1), value: reorderTargeted)
         .dropDestination(for: String.self) { droppedItems, _ in
-            guard let idString = droppedItems.first, let id = UUID(uuidString: idString) else { return false }
-            // Option turns a drop from "put it here" into "these are the same
-            // task". Read at the drop itself, from the keyboard rather than
-            // from hover state that may have gone stale.
-            if NSEvent.modifierFlags.contains(.option), let onMergeDrop {
-                onMergeDrop(id)
-                return true
-            }
-            guard let onReorder else { return false }
-            onReorder(id)
+            guard let onMergeDrop, let idString = droppedItems.first,
+                  let id = UUID(uuidString: idString) else { return false }
+            onMergeDrop(id)
             return true
-        } isTargeted: { targeted in
-            isDropTargeted = targeted
-            mergeHint = targeted && NSEvent.modifierFlags.contains(.option)
-        }
+        } isTargeted: { mergeTargeted = $0 }
     }
 
     /// What you actually pick up. `.draggable` rasterises the view it's
@@ -1145,12 +1148,16 @@ struct TaskCard: View {
     }
 
     private var cardBackground: AnyShapeStyle {
+        // Filled in while a card hovers over this one, so "drop here to
+        // merge" reads differently from "drop here to reorder".
+        if mergeTargeted { return AnyShapeStyle(Theme.accentSoft) }
         if column == .completed { return AnyShapeStyle(Theme.successSoft) }
         return AnyShapeStyle(hovering ? Theme.surface : Theme.surface.opacity(0.7))
     }
 
     private var borderColor: Color {
-        if isDropTargeted { return Theme.accent }
+        if mergeTargeted { return Theme.accent }
+        if reorderTargeted { return Theme.accent }
         if column == .completed { return Theme.success }
         if column == .upcoming, !task.isCompleted, let due = task.dueDate {
             return Self.urgencyColor(for: due)
@@ -1159,7 +1166,7 @@ struct TaskCard: View {
     }
 
     private var borderWidth: CGFloat {
-        if isDropTargeted || column == .completed { return 2 }
+        if mergeTargeted || reorderTargeted || column == .completed { return 2 }
         if column == .upcoming, !task.isCompleted, task.dueDate != nil { return 1.5 }
         return 1
     }
