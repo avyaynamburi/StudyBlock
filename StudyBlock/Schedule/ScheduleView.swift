@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ScheduleView: View {
     @EnvironmentObject private var scheduler: BlockScheduleController
@@ -7,17 +9,35 @@ struct ScheduleView: View {
     @State private var editing: BlockSchedule?
     @State private var isNew = false
     @State private var deleting: BlockSchedule?
+    @State private var importing: PendingImport?
+    @State private var importError: String?
+
+    /// A parsed calendar waiting for the user to confirm what to create.
+    private struct PendingImport: Identifiable {
+        let id = UUID()
+        let fileName: String
+        let outcome: ScheduleICSImport.Outcome
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             PageHeader("Schedule", subtitle: headerSubtitle) {
-                Button {
-                    editing = BlockSchedule(name: "")
-                    isNew = true
-                } label: {
-                    Label("New Schedule", systemImage: "plus")
+                HStack(spacing: 10) {
+                    Button(action: chooseCalendarFile) {
+                        Label("Import .ics", systemImage: "calendar.badge.plus")
+                    }
+                    .buttonStyle(SoftPillButtonStyle())
+                    .help("Turn a class timetable into blocking windows \u{2014} "
+                          + "days and times are kept, dates are dropped")
+
+                    Button {
+                        editing = BlockSchedule(name: "")
+                        isNew = true
+                    } label: {
+                        Label("New Schedule", systemImage: "plus")
+                    }
+                    .buttonStyle(ProminentPillButtonStyle())
                 }
-                .buttonStyle(ProminentPillButtonStyle())
             }
 
             ScrollView {
@@ -58,6 +78,21 @@ struct ScheduleView: View {
                 if isNew { scheduler.add(saved) } else { scheduler.update(saved) }
             }
         }
+        .sheet(item: $importing) { pending in
+            ScheduleImportSheet(fileName: pending.fileName, outcome: pending.outcome,
+                                groups: blocker.groups) { candidates, groupIDs in
+                for candidate in candidates {
+                    scheduler.add(candidate.schedule(groupIDs: groupIDs))
+                }
+            }
+        }
+        .alert("Import failed", isPresented: Binding(
+            get: { importError != nil }, set: { if !$0 { importError = nil } })
+        ) {
+            Button("OK") { importError = nil }
+        } message: {
+            Text(importError ?? "")
+        }
         .confirmationDialog("Delete this schedule?",
                             isPresented: Binding(get: { deleting != nil },
                                                  set: { if !$0 { deleting = nil } })) {
@@ -68,6 +103,28 @@ struct ScheduleView: View {
             Button("Cancel", role: .cancel) { deleting = nil }
         } message: {
             Text("Its hours stop switching your block lists on. Nothing currently blocked changes until the window would have ended.")
+        }
+    }
+
+    /// Opens a `.ics`, converts it, and hands the result to the review sheet.
+    /// Nothing is created here — the sheet does that, once confirmed.
+    private func chooseCalendarFile() {
+        let panel = NSOpenPanel()
+        var types: [UTType] = []
+        if let ics = UTType(filenameExtension: "ics") { types.append(ics) }
+        types.append(contentsOf: [.calendarEvent, .text])
+        panel.allowedContentTypes = types
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Choose a calendar file (.ics) to turn into block windows."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let outcome = ScheduleICSImport.read(data)
+            importing = PendingImport(fileName: url.lastPathComponent, outcome: outcome)
+        } catch {
+            importError = "That file couldn\u{2019}t be read."
         }
     }
 

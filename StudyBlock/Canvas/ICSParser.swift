@@ -17,12 +17,29 @@ enum ICSDate: Equatable {
     case day(year: Int, month: Int, day: Int)
 }
 
+/// How an event repeats, as much of `RRULE` as a weekly schedule needs.
+struct ICSRecurrence: Equatable {
+    /// `WEEKLY`, `DAILY`, … verbatim from `FREQ`.
+    var frequency: String
+    /// Days from `BYDAY`, as 1 = Sunday … 7 = Saturday. Empty means the rule
+    /// gave none, in which case the event repeats on whatever weekday
+    /// `DTSTART` falls on.
+    var weekdays: Set<Int> = []
+    var interval = 1
+}
+
 /// One `VEVENT`, with only the properties this app reads.
 struct ICSEvent: Equatable {
     var uid: String?
     var summary: String
     var url: String?
     var start: ICSDate?
+    /// When the event ends. Absent on many feeds, where `duration` carries it
+    /// instead — and absent on both for an instantaneous or all-day entry.
+    var end: ICSDate?
+    /// `DURATION`, in seconds, as an alternative to `DTEND`.
+    var duration: TimeInterval?
+    var recurrence: ICSRecurrence?
 }
 
 /// A deliberately small RFC 5545 reader: enough of the grammar to read a
@@ -67,6 +84,12 @@ enum ICSParser {
                 current?.url = unescape(value)
             case "DTSTART":
                 current?.start = date(value: value, parameters: parameters)
+            case "DTEND":
+                current?.end = date(value: value, parameters: parameters)
+            case "DURATION":
+                current?.duration = duration(value)
+            case "RRULE":
+                current?.recurrence = recurrence(value)
             default:
                 continue
             }
@@ -183,6 +206,77 @@ enum ICSParser {
         }
         guard let instant = instant(from: trimmed, timeZoneID: parameters["TZID"]) else { return nil }
         return .instant(instant)
+    }
+
+    // MARK: - Recurrence and duration
+
+    /// Two-letter `BYDAY` codes to `Calendar`'s 1 = Sunday numbering.
+    private static let weekdayCodes = ["SU": 1, "MO": 2, "TU": 3, "WE": 4,
+                                       "TH": 5, "FR": 6, "SA": 7]
+
+    /// Reads `FREQ=WEEKLY;BYDAY=MO,WE,FR;INTERVAL=1`.
+    ///
+    /// `UNTIL` and `COUNT` are deliberately ignored: a block schedule is a
+    /// standing weekly pattern with no end date to put them in, and silently
+    /// dropping a term's end is better than pretending to honour it.
+    static func recurrence(_ value: String) -> ICSRecurrence? {
+        var frequency: String?
+        var weekdays: Set<Int> = []
+        var interval = 1
+
+        for part in value.split(separator: ";") {
+            guard let equals = part.firstIndex(of: "=") else { continue }
+            let key = part[part.startIndex..<equals].uppercased()
+            let raw = String(part[part.index(after: equals)...])
+            switch key {
+            case "FREQ":
+                frequency = raw.uppercased()
+            case "INTERVAL":
+                interval = max(1, Int(raw) ?? 1)
+            case "BYDAY":
+                for day in raw.split(separator: ",") {
+                    // A day may carry an ordinal — "2MO" is the second Monday
+                    // of the month. Only the day itself matters here.
+                    let code = String(day.suffix(2)).uppercased()
+                    if let weekday = weekdayCodes[code] { weekdays.insert(weekday) }
+                }
+            default:
+                continue
+            }
+        }
+        guard let frequency else { return nil }
+        return ICSRecurrence(frequency: frequency, weekdays: weekdays, interval: interval)
+    }
+
+    /// Reads the `PnDTnHnMnS` subset of ISO 8601 durations that calendars use.
+    static func duration(_ value: String) -> TimeInterval? {
+        var text = Substring(value.uppercased())
+        var sign = 1.0
+        if text.hasPrefix("-") { sign = -1; text = text.dropFirst() }
+        else if text.hasPrefix("+") { text = text.dropFirst() }
+        guard text.hasPrefix("P") else { return nil }
+        text = text.dropFirst()
+
+        var total = 0.0
+        var number = ""
+        var inTime = false
+        var sawAny = false
+        for character in text {
+            if character == "T" { inTime = true; number = ""; continue }
+            if character.isNumber { number.append(character); continue }
+            guard let amount = Double(number) else { return nil }
+            number = ""
+            switch character {
+            case "W": total += amount * 604_800
+            case "D": total += amount * 86_400
+            case "H": total += amount * 3_600
+            case "M": total += inTime ? amount * 60 : amount * 2_592_000
+            case "S": total += amount
+            default: return nil
+            }
+            sawAny = true
+        }
+        return sawAny ? sign * total : nil
     }
 
     private static func calendarDate(_ text: String) -> (Int, Int, Int)? {
