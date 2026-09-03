@@ -80,6 +80,14 @@ final class BlockScheduleController: ObservableObject {
         schedules.removeAll { $0.id == id }
     }
 
+    /// Removes every schedule. `didSet` re-evaluates, so a window that was
+    /// open a moment ago closes here and hands its block back — the same path
+    /// as deleting the last schedule one at a time.
+    func clearAll() {
+        guard !schedules.isEmpty else { return }
+        schedules.removeAll()
+    }
+
     func setEnabled(_ id: UUID, _ enabled: Bool) {
         guard let index = schedules.firstIndex(where: { $0.id == id }) else { return }
         schedules[index].isEnabled = enabled
