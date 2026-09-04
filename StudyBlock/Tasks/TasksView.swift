@@ -1171,11 +1171,12 @@ struct TaskCard: View {
         return 1
     }
 
-    /// Yellow (a week or more out) → orange → red (due now or overdue).
+    /// How close this card is to its deadline, as the faint red border
+    /// `Theme.urgency` draws: barely there a week out, firmest once the day
+    /// arrives.
     private static func urgencyColor(for dueDate: Date, now: Date = Date()) -> Color {
         let daysRemaining = dueDate.timeIntervalSince(now) / 86400
-        let t = min(1, max(0, 1 - daysRemaining / 7))
-        return Color(hue: (60 - 60 * t) / 360, saturation: 0.82, brightness: 0.92)
+        return Theme.urgency(1 - daysRemaining / 7)
     }
 
     static func dueLabel(for date: Date) -> String {
