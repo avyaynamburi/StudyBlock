@@ -119,18 +119,19 @@ struct MainView: View {
                     Circle()
                         .stroke(Theme.accentSoft, lineWidth: 3.5)
                     Circle()
-                        .trim(from: 0, to: timer.progress)
+                        .trim(from: 0, to: timer.ringProgress)
                         .stroke(Theme.accentFill, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                    Image(systemName: timer.isLockedSession ? "lock.fill" : "timer")
+                    Image(systemName: timer.isLockedSession ? "lock.fill"
+                          : (timer.isStopwatch ? "stopwatch" : "timer"))
                         .font(Theme.ui(10, .semibold))
                         .foregroundStyle(Theme.accent)
                 }
                 .frame(width: 30, height: 30)
-                .animation(.linear(duration: 1), value: timer.progress)
+                .animation(.linear(duration: 1), value: timer.ringProgress)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(timer.remainingLabel)
+                    Text(timer.displayLabel)
                         .font(Theme.number(15, weight: .semibold))
                         .monospacedDigit()
                     Text(timer.currentTaskTitle ?? "Focus session")

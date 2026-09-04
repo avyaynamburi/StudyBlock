@@ -7,7 +7,10 @@ struct FocusView: View {
     @EnvironmentObject private var appBlocker: AppBlockerController
     @EnvironmentObject private var tabCloser: BrowserTabCloser
     @AppStorage("lockSessions") private var lockSessions = false
-    @State private var customMinutes = 30
+    /// Typed rather than stepped. Held as text so a half-finished entry is
+    /// the user's business, not something to be rounded into a number.
+    @State private var minutesText = "30"
+    @AppStorage("focusModeChoice") private var modeChoice = FocusMode.timer.rawValue
     /// Per-list text for the "add a website" field, keyed by group.
     @State private var draftDomain: [UUID: String] = [:]
     @State private var expandedGroups: Set<UUID> = []
@@ -93,17 +96,17 @@ struct FocusView: View {
                 Circle()
                     .stroke(Theme.accentSoft, lineWidth: 10)
                 Circle()
-                    .trim(from: 0, to: timer.progress)
+                    .trim(from: 0, to: timer.ringProgress)
                     .stroke(Theme.accentFill, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(.linear(duration: 1), value: timer.progress)
+                    .animation(.linear(duration: 1), value: timer.ringProgress)
 
                 VStack(spacing: 2) {
-                    Text(timer.isAwaitingConfirmation ? timer.overtimeLabel : timer.remainingLabel)
-                        .font(Theme.number(44))
+                    Text(timer.displayLabel)
+                        .font(Theme.number(timer.displayLabel.count > 5 ? 36 : 44))
                         .monospacedDigit()
                         .foregroundStyle(timer.isAwaitingConfirmation ? Theme.success : .primary)
-                    Text(timer.isAwaitingConfirmation ? "over" : "remaining")
+                    Text(ringCaption)
                         .font(Theme.ui(10, .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -136,6 +139,16 @@ struct FocusView: View {
                         .font(Theme.ui(10))
                         .foregroundStyle(.tertiary)
                 }
+            } else if timer.isStopwatch {
+                // Stopping a stopwatch is how it is meant to end, so this is
+                // the finish button, not an admission of defeat.
+                Button {
+                    timer.stopStopwatch()
+                } label: {
+                    Label("Finish Session", systemImage: "flag.checkered")
+                }
+                .buttonStyle(ProminentPillButtonStyle(size: .large))
+                .help("Records \(timer.elapsedMinutes) minutes of focus and releases the block")
             } else {
                 Button("Give Up") { timer.giveUp() }
                     .buttonStyle(SoftPillButtonStyle(tint: Theme.danger))
@@ -146,7 +159,17 @@ struct FocusView: View {
         }
     }
 
+    private var ringCaption: String {
+        if timer.isAwaitingConfirmation { return "over" }
+        return timer.isStopwatch ? "elapsed" : "remaining"
+    }
+
     private var timerCaption: String {
+        if timer.isStopwatch {
+            return model.isBlocking
+                ? "Stopwatch running — blocking \(model.domains.count) website\(model.domains.count == 1 ? "" : "s") until you finish"
+                : "Stopwatch running — websites not blocked"
+        }
         if timer.isAwaitingConfirmation {
             return model.isBlocking
                 ? "Time's up — still blocking until you finish the session"
@@ -195,67 +218,122 @@ struct FocusView: View {
             VStack(spacing: 4) {
                 Text("Start a focus session")
                     .font(Theme.ui(20, .semibold))
-                Text("Distracting websites and apps are blocked automatically while the timer runs.")
+                Text(focusMode == .stopwatch
+                     ? "Counts up until you stop it. Distracting websites and apps stay blocked the whole time."
+                     : "Distracting websites and apps are blocked automatically while the timer runs.")
                     .font(Theme.ui(12))
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 460)
             }
 
-            HStack(spacing: 10) {
-                ForEach(FocusTimerController.presetMinutes, id: \.self) { minutes in
-                    Button("\(minutes) min") { timer.start(minutes: minutes, locked: lockSessions) }
-                        .buttonStyle(SoftPillButtonStyle())
+            modePicker
+
+            if focusMode == .timer {
+                HStack(spacing: 10) {
+                    ForEach(FocusTimerController.presetMinutes, id: \.self) { minutes in
+                        Button("\(minutes) min") { minutesText = String(minutes) }
+                            .buttonStyle(SoftPillButtonStyle(
+                                tint: typedMinutes == minutes ? Theme.accent : nil))
+                    }
                 }
             }
 
             HStack(spacing: 12) {
-                HStack(spacing: 0) {
-                    stepperButton("minus") { customMinutes = max(5, customMinutes - 5) }
-                    Text("\(customMinutes) min")
-                        .font(Theme.number(15, weight: .semibold))
-                        .monospacedDigit()
-                        .frame(width: 68)
-                    stepperButton("plus") { customMinutes = min(180, customMinutes + 5) }
-                }
-                .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .strokeBorder(Theme.stroke, lineWidth: 1))
+                if focusMode == .timer { minutesField }
 
                 Button {
-                    timer.start(minutes: customMinutes, locked: lockSessions)
+                    startSession()
                 } label: {
-                    Label("Start", systemImage: "play.fill")
+                    Label(focusMode == .stopwatch ? "Start Stopwatch" : "Start",
+                          systemImage: "play.fill")
                 }
                 .buttonStyle(ProminentPillButtonStyle(size: .large))
                 .keyboardShortcut(.defaultAction)
+                .disabled(focusMode == .timer && typedMinutes == nil)
             }
 
-            VStack(spacing: 6) {
-                Toggle(isOn: $lockSessions) {
-                    Text("Lock sessions — no giving up until time is up")
-                        .font(Theme.ui(12))
-                }
-                .toggleStyle(CheckToggleStyle())
+            // A lock is the helper being told when to let go, so there is
+            // nothing to offer a session with no end.
+            if focusMode == .timer {
+                VStack(spacing: 6) {
+                    Toggle(isOn: $lockSessions) {
+                        Text("Lock sessions — no giving up until time is up")
+                            .font(Theme.ui(12))
+                    }
+                    .toggleStyle(CheckToggleStyle())
 
-                if lockSessions {
-                    Text("The helper enforces the lock: quitting the app, editing /etc/hosts, or rebooting won't unblock early. Max 8 hours.")
-                        .font(Theme.ui(10))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 420)
+                    if lockSessions {
+                        Text("The helper enforces the lock: quitting the app, editing /etc/hosts, or rebooting won't unblock early. Max 8 hours.")
+                            .font(Theme.ui(10))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 420)
+                    }
                 }
             }
         }
     }
 
-    private func stepperButton(_ symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(Theme.ui(12, .semibold))
-                .frame(width: 34, height: 34)
-                .contentShape(Rectangle())
+    private var focusMode: FocusMode {
+        FocusMode(rawValue: modeChoice) ?? .timer
+    }
+
+    /// Timer or stopwatch. Two pills rather than a segmented control, so it
+    /// matches the preset row directly beneath it.
+    private var modePicker: some View {
+        HStack(spacing: 8) {
+            ForEach(FocusMode.allCases) { mode in
+                Button {
+                    modeChoice = mode.rawValue
+                } label: {
+                    Label(mode.label, systemImage: mode.icon)
+                }
+                .buttonStyle(SoftPillButtonStyle(tint: focusMode == mode ? Theme.accent : nil))
+            }
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+    }
+
+    /// What Start will use, or nil while the box holds something unusable —
+    /// which disables Start rather than quietly substituting a number the
+    /// user didn't ask for.
+    private var typedMinutes: Int? {
+        let trimmed = minutesText.trimmingCharacters(in: .whitespaces)
+        guard let value = Int(trimmed), (1...600).contains(value) else { return nil }
+        return value
+    }
+
+    /// The duration box: typed, not stepped. Keeps the stepper's shell — the
+    /// same low surface, hairline and corner radius — so only the innards
+    /// changed.
+    private var minutesField: some View {
+        HStack(spacing: 5) {
+            TextField("30", text: $minutesText)
+                .textFieldStyle(.plain)
+                .font(Theme.number(15, weight: .semibold))
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .frame(width: 42)
+                .onSubmit(startSession)
+            Text("min")
+                .font(Theme.ui(12))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .strokeBorder(typedMinutes == nil ? Theme.danger : Theme.stroke, lineWidth: 1))
+    }
+
+    private func startSession() {
+        switch focusMode {
+        case .stopwatch:
+            timer.startStopwatch()
+        case .timer:
+            guard let typedMinutes else { return }
+            timer.start(minutes: typedMinutes, locked: lockSessions)
+        }
     }
 
     // MARK: - Helper banners

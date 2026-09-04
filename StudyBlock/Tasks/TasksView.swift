@@ -99,8 +99,8 @@ struct TasksView: View {
                           onCreateCategory: { name, hue in store.setHue(hue, for: name) })
         }
         .sheet(item: $timerPromptTask) { task in
-            StudyTimerPromptSheet(task: task, defaultMinutes: timer.defaultMinutes) { minutes, locked in
-                timer.start(minutes: minutes, task: task, locked: locked)
+            StudyTimerPromptSheet(task: task, defaultMinutes: timer.defaultMinutes) { mode, minutes, locked in
+                timer.start(mode: mode, minutes: minutes, task: task, locked: locked)
             }
         }
         .sheet(isPresented: $showingCSVSheet) {
@@ -1463,30 +1463,31 @@ struct WeekdayPicker: View {
 private struct StudyTimerPromptSheet: View {
     let task: TodoItem
     let defaultMinutes: Int
-    let onStart: (Int, Bool) -> Void
+    let onStart: (FocusMode, Int, Bool) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage("lockSessions") private var lockSessions = false
-    @State private var selectedMinutes: Int
-    @State private var customText = ""
-    @FocusState private var customFocused: Bool
+    @AppStorage("focusModeChoice") private var modeChoice = FocusMode.timer.rawValue
+    /// Typed, matching the Focus screen. The presets write into it rather
+    /// than sitting beside it, so there is one place the duration lives.
+    @State private var minutesText: String
 
-    /// What Start will actually use: whatever is typed in the custom box if
-    /// it's a sane number, otherwise the chosen preset. Nil means the box has
-    /// something unusable in it, which disables Start rather than silently
-    /// falling back to a duration the user didn't ask for.
-    private var minutes: Int? {
-        let typed = customText.trimmingCharacters(in: .whitespaces)
-        guard !typed.isEmpty else { return selectedMinutes }
-        guard let value = Int(typed), (1...600).contains(value) else { return nil }
-        return value
-    }
-
-    init(task: TodoItem, defaultMinutes: Int, onStart: @escaping (Int, Bool) -> Void) {
+    init(task: TodoItem, defaultMinutes: Int, onStart: @escaping (FocusMode, Int, Bool) -> Void) {
         self.task = task
         self.defaultMinutes = defaultMinutes
         self.onStart = onStart
-        _selectedMinutes = State(initialValue: defaultMinutes)
+        _minutesText = State(initialValue: String(defaultMinutes))
+    }
+
+    private var mode: FocusMode { FocusMode(rawValue: modeChoice) ?? .timer }
+
+    /// What Start will use, or nil while the box holds something unusable,
+    /// which disables Start rather than falling back to a duration the user
+    /// didn't ask for.
+    private var minutes: Int? {
+        let trimmed = minutesText.trimmingCharacters(in: .whitespaces)
+        guard let value = Int(trimmed), (1...600).contains(value) else { return nil }
+        return value
     }
 
     var body: some View {
@@ -1494,13 +1495,13 @@ private struct StudyTimerPromptSheet: View {
             VStack(spacing: 6) {
                 ZStack {
                     Circle().fill(Theme.accentSoft).frame(width: 52, height: 52)
-                    Image(systemName: "bolt.fill")
+                    Image(systemName: mode == .stopwatch ? "stopwatch" : "bolt.fill")
                         .font(Theme.ui(20, .semibold))
                         .foregroundStyle(Theme.accent)
                 }
-                Text("Start a study timer?")
+                Text(mode == .stopwatch ? "Start a stopwatch?" : "Start a study timer?")
                     .font(Theme.ui(17, .semibold))
-                Text("\"\(task.title)\" just moved to Currently Doing.")
+                Text("\u{201C}\(task.title)\u{201D} just moved to Currently Doing.")
                     .font(Theme.ui(12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -1508,41 +1509,57 @@ private struct StudyTimerPromptSheet: View {
             }
             .padding(.top, 24)
 
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    ForEach(FocusTimerController.presetMinutes, id: \.self) { preset in
-                        Button("\(preset) min") {
-                            selectedMinutes = preset
-                            customText = ""
-                            customFocused = false
-                        }
-                        .buttonStyle(SoftPillButtonStyle(
-                            tint: customText.isEmpty && selectedMinutes == preset ? Theme.accent : nil))
+            HStack(spacing: 8) {
+                ForEach(FocusMode.allCases) { option in
+                    Button {
+                        modeChoice = option.rawValue
+                    } label: {
+                        Label(option.label, systemImage: option.icon)
                     }
-                }
-
-                HStack(spacing: 8) {
-                    Text("or").font(Theme.ui(12)).foregroundStyle(.secondary)
-                    TextField("custom", text: $customText)
-                        .textFieldStyle(.plain)
-                        .multilineTextAlignment(.center)
-                        .frame(width: 54)
-                        .padding(.vertical, 5)
-                        .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .strokeBorder(minutes == nil ? Theme.danger : Theme.stroke, lineWidth: 1))
-                        .focused($customFocused)
-                        .onSubmit { if minutes != nil { start() } }
-                    Text("minutes").font(Theme.ui(12)).foregroundStyle(.secondary)
+                    .buttonStyle(SoftPillButtonStyle(tint: mode == option ? Theme.accent : nil))
                 }
             }
 
-            Toggle(isOn: $lockSessions) {
-                Text("Lock session — no giving up until time is up")
-                    .font(Theme.ui(12))
+            if mode == .timer {
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        ForEach(FocusTimerController.presetMinutes, id: \.self) { preset in
+                            Button("\(preset) min") { minutesText = String(preset) }
+                                .buttonStyle(SoftPillButtonStyle(
+                                    tint: minutes == preset ? Theme.accent : nil))
+                        }
+                    }
+
+                    HStack(spacing: 5) {
+                        TextField("30", text: $minutesText)
+                            .textFieldStyle(.plain)
+                            .font(Theme.number(15, weight: .semibold))
+                            .monospacedDigit()
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 42)
+                            .onSubmit(start)
+                        Text("min").font(Theme.ui(12)).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .background(Theme.surfaceLow, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .strokeBorder(minutes == nil ? Theme.danger : Theme.stroke, lineWidth: 1))
+                }
+
+                Toggle(isOn: $lockSessions) {
+                    Text("Lock session \u{2014} no giving up until time is up")
+                        .font(Theme.ui(12))
+                }
+                .toggleStyle(CheckToggleStyle())
+                .padding(.horizontal, 24)
+            } else {
+                Text("Counts up from zero until you finish it. Blocking stays on the whole time.")
+                    .font(Theme.ui(11))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
             }
-            .toggleStyle(CheckToggleStyle())
-            .padding(.horizontal, 24)
 
             HStack {
                 Button("Not Now") { dismiss() }
@@ -1550,11 +1567,12 @@ private struct StudyTimerPromptSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(action: start) {
-                    Label("Start Timer", systemImage: "play.fill")
+                    Label(mode == .stopwatch ? "Start Stopwatch" : "Start Timer",
+                          systemImage: "play.fill")
                 }
                 .buttonStyle(ProminentPillButtonStyle())
                 .keyboardShortcut(.defaultAction)
-                .disabled(minutes == nil)
+                .disabled(mode == .timer && minutes == nil)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
@@ -1564,8 +1582,13 @@ private struct StudyTimerPromptSheet: View {
     }
 
     private func start() {
-        guard let minutes else { return }
-        onStart(minutes, lockSessions)
+        switch mode {
+        case .stopwatch:
+            onStart(.stopwatch, 0, false)
+        case .timer:
+            guard let minutes else { return }
+            onStart(.timer, minutes, lockSessions)
+        }
         dismiss()
     }
 }

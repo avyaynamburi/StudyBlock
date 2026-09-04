@@ -53,8 +53,14 @@ struct StudyBlockApp: App {
                     }
                 }
             } else if timer.isRunning {
-                Text("Focus session — \(timer.remainingLabel) left")
-                if timer.isLockedSession {
+                Text(timer.isStopwatch
+                     ? "Stopwatch — \(timer.elapsedLabel) so far"
+                     : "Focus session — \(timer.remainingLabel) left")
+                if timer.isStopwatch {
+                    // Stopping a stopwatch is its normal ending, so it banks
+                    // the time rather than counting as giving up.
+                    Button("Finish Session") { timer.stopStopwatch() }
+                } else if timer.isLockedSession {
                     Text("Locked until \(timer.lockedUntilLabel)")
                 } else {
                     Button("Give Up Session") { timer.giveUp() }
@@ -80,7 +86,7 @@ struct StudyBlockApp: App {
             if timer.isAwaitingConfirmation {
                 Text("done").monospacedDigit()
             } else if timer.isRunning {
-                Text(timer.remainingLabel).monospacedDigit()
+                Text(timer.displayLabel).monospacedDigit()
             }
             Image(systemName: blocker.isBlocking ? "shield.fill" : "shield")
         }

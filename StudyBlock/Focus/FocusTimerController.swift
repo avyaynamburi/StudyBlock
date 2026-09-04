@@ -2,6 +2,20 @@ import AppKit
 import Foundation
 import UserNotifications
 
+/// How a session measures itself.
+///
+/// A timer counts down to a deadline it was given; a stopwatch counts up and
+/// ends when you say so. Everything else about a session — blocking, stats,
+/// the task it is linked to — is identical, which is why this is a mode on
+/// one controller rather than a second one.
+enum FocusMode: String, CaseIterable, Identifiable {
+    case timer, stopwatch
+
+    var id: String { rawValue }
+    var label: String { self == .timer ? "Timer" : "Stopwatch" }
+    var icon: String { self == .timer ? "timer" : "stopwatch" }
+}
+
 /// Drives focus sessions: countdown, auto-block on start, auto-unblock on
 /// end, stats recording, and completion notification. Sessions can be
 /// **locked** (helper-enforced: no early unblock, hosts tampering reverted)
@@ -15,6 +29,12 @@ final class FocusTimerController: ObservableObject {
 
     @Published private(set) var endDate: Date?
     @Published private(set) var remaining: TimeInterval = 0
+    /// Which way this session counts. A stopwatch has no `endDate`, so most
+    /// of the countdown machinery simply doesn't apply to it.
+    @Published private(set) var mode: FocusMode = .timer
+    /// How long the session has been running, counted up. Maintained for both
+    /// modes — the timer uses it to credit overtime, the stopwatch shows it.
+    @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var isLockedSession = false
     @Published private(set) var currentTaskTitle: String?
     @Published private(set) var currentTaskCourse: String?
@@ -54,6 +74,7 @@ final class FocusTimerController: ObservableObject {
         static let taskTitle = "focusTaskTitle"
         static let taskCourse = "focusTaskCourse"
         static let lastMinutes = "focusLastMinutes"
+        static let mode = "focusSessionMode"
     }
 
     init(blocker: BlockerViewModel, stats: StatsStore) {
@@ -65,14 +86,29 @@ final class FocusTimerController: ObservableObject {
         }
     }
 
-    var isRunning: Bool { endDate != nil }
+    /// A session is running whenever it has a start. It used to key off
+    /// `endDate`, which a stopwatch does not have.
+    var isRunning: Bool { startDate != nil }
 
-    /// Fraction of the session elapsed, 0…1. Drives the progress rings.
+    var isStopwatch: Bool { mode == .stopwatch }
+
+    /// Fraction of the session elapsed, 0…1. Drives the progress ring, which
+    /// a stopwatch has no basis for — there is no total to be a fraction of.
     var progress: Double {
         guard let endDate, let startDate else { return 0 }
         let total = endDate.timeIntervalSince(startDate)
         guard total > 0 else { return 0 }
         return min(1, max(0, 1 - remaining / total))
+    }
+
+    /// What the progress ring should draw.
+    ///
+    /// A stopwatch has no total to be a fraction of, so rather than sit at
+    /// zero looking broken, its ring sweeps once a minute — motion that says
+    /// "running" without implying an end that doesn't exist.
+    var ringProgress: Double {
+        guard mode == .stopwatch else { return progress }
+        return elapsed.truncatingRemainder(dividingBy: 60) / 60
     }
 
     /// Duration of the last started session; used by "focus on this task".
@@ -82,8 +118,28 @@ final class FocusTimerController: ObservableObject {
     }
 
     var remainingLabel: String {
-        let total = max(0, Int(remaining.rounded()))
-        return String(format: "%d:%02d", total / 60, total % 60)
+        Self.clock(remaining)
+    }
+
+    /// The stopwatch's own reading, counting up.
+    var elapsedLabel: String {
+        Self.clock(elapsed)
+    }
+
+    /// Whatever this session's headline number is, for the ring and the menu
+    /// bar: time left on a timer, time served on a stopwatch.
+    var displayLabel: String {
+        if isAwaitingConfirmation { return overtimeLabel }
+        return mode == .stopwatch ? elapsedLabel : remainingLabel
+    }
+
+    /// m:ss, growing an hours field only once it is needed — a stopwatch can
+    /// run all afternoon, where a 25-minute timer never could.
+    private static func clock(_ interval: TimeInterval) -> String {
+        let total = max(0, Int(interval.rounded()))
+        let hours = total / 3600
+        guard hours > 0 else { return String(format: "%d:%02d", total / 60, total % 60) }
+        return String(format: "%d:%02d:%02d", hours, (total % 3600) / 60, total % 60)
     }
 
     var lockedUntilLabel: String {
@@ -91,8 +147,7 @@ final class FocusTimerController: ObservableObject {
     }
 
     var overtimeLabel: String {
-        let total = max(0, Int(overtime.rounded()))
-        return String(format: "%d:%02d", total / 60, total % 60)
+        Self.clock(overtime)
     }
 
     /// Minutes the session has actually run, overtime included — what gets
@@ -104,13 +159,39 @@ final class FocusTimerController: ObservableObject {
 
     func start(minutes: Int, task: TodoItem? = nil, locked: Bool = false) {
         guard !isRunning, minutes > 0 else { return }
-        Task { await startSession(minutes: minutes, task: task, locked: locked) }
+        Task { await startSession(mode: .timer, minutes: minutes, task: task, locked: locked) }
+    }
+
+    /// Starts an open-ended session that counts up until it is stopped.
+    ///
+    /// Never locked: the helper enforces a lock by being told when to release
+    /// it, and a stopwatch has no such moment to give.
+    func startStopwatch(task: TodoItem? = nil) {
+        guard !isRunning else { return }
+        Task { await startSession(mode: .stopwatch, minutes: 0, task: task, locked: false) }
+    }
+
+    /// Starts whichever kind of session `mode` names, so callers holding a
+    /// mode picker don't each have to branch.
+    func start(mode: FocusMode, minutes: Int, task: TodoItem? = nil, locked: Bool = false) {
+        switch mode {
+        case .timer: start(minutes: minutes, task: task, locked: locked)
+        case .stopwatch: startStopwatch(task: task)
+        }
     }
 
     /// Ends the session early. No-op for locked sessions — that's the point.
     func giveUp() {
         guard !isLockedSession else { return }
         finish(completed: false)
+    }
+
+    /// Ends a stopwatch and banks the time. Stopping one is how it is
+    /// *meant* to end, so unlike `giveUp` this counts as a completed session
+    /// rather than an abandoned one.
+    func stopStopwatch() {
+        guard isRunning, mode == .stopwatch else { return }
+        finish(completed: true, notify: false, endingAt: Date())
     }
 
     /// Ends a *locked* session early. Only call this after the typed-challenge
@@ -127,15 +208,18 @@ final class FocusTimerController: ObservableObject {
 
     // MARK: - Internals
 
-    private func startSession(minutes: Int, task: TodoItem?, locked: Bool) async {
+    private func startSession(mode: FocusMode, minutes: Int, task: TodoItem?, locked: Bool) async {
         // Tells background automation (the block schedule) to keep its hands
         // off the block until this session ends.
         blocker.isSessionManaged = true
+        self.mode = mode
         let now = Date()
-        let end = now.addingTimeInterval(TimeInterval(minutes * 60))
+        // A stopwatch has no deadline; everything downstream keys off this
+        // being nil rather than off the mode itself.
+        let end: Date? = mode == .timer ? now.addingTimeInterval(TimeInterval(minutes * 60)) : nil
         let canBlock = !blocker.domains.isEmpty && blocker.helperState == .ready
 
-        if locked, canBlock {
+        if locked, canBlock, let end {
             // A locked session must be confirmed by the helper before we
             // present it as locked (inescapable), so this one path waits —
             // but the XPC call is now bounded by a timeout, so it can't hang.
@@ -156,6 +240,7 @@ final class FocusTimerController: ObservableObject {
 
         startDate = now
         endDate = end
+        elapsed = 0
         currentTaskID = task?.id
         currentTaskTitle = task?.title
         currentTaskCourse = task?.course
@@ -168,15 +253,41 @@ final class FocusTimerController: ObservableObject {
         defaults.set(task?.id.uuidString, forKey: Keys.taskID)
         defaults.set(task?.title, forKey: Keys.taskTitle)
         defaults.set(task?.course, forKey: Keys.taskCourse)
-        defaults.set(minutes, forKey: Keys.lastMinutes)
+        defaults.set(mode.rawValue, forKey: Keys.mode)
+        // Only a real duration is worth remembering as the default next time.
+        if mode == .timer { defaults.set(minutes, forKey: Keys.lastMinutes) }
 
         startTicker()
     }
 
     private func restorePersistedSession() {
         let defaults = UserDefaults.standard
+        let savedMode = defaults.string(forKey: Keys.mode).flatMap(FocusMode.init(rawValue:)) ?? .timer
+
+        // A stopwatch is stored as a start with no end, so it restores on a
+        // path of its own: pick the clock back up where it was and keep going.
+        if savedMode == .stopwatch {
+            guard let start = defaults.object(forKey: Keys.start) as? Date else { return }
+            mode = .stopwatch
+            startDate = start
+            endDate = nil
+            isLockedSession = false
+            blockingWasOnBefore = defaults.bool(forKey: Keys.blockingWasOn)
+            currentTaskID = defaults.string(forKey: Keys.taskID).flatMap(UUID.init)
+            currentTaskTitle = defaults.string(forKey: Keys.taskTitle)
+            currentTaskCourse = defaults.string(forKey: Keys.taskCourse)
+            blocker.isSessionManaged = true
+            startTicker()
+            return
+        }
+
+        mode = .timer
         guard let end = defaults.object(forKey: Keys.end) as? Date else { return }
-        startDate = defaults.object(forKey: Keys.start) as? Date
+        // `isRunning` keys off the start now, so a stored session missing its
+        // start would read as not running while its ticker ran and its end
+        // date sat in defaults — live, invisible, and impossible to finish.
+        // Falling back keeps it recoverable; only a corrupt store gets here.
+        startDate = (defaults.object(forKey: Keys.start) as? Date) ?? Date()
         blockingWasOnBefore = defaults.bool(forKey: Keys.blockingWasOn)
         isLockedSession = defaults.bool(forKey: Keys.locked)
         currentTaskID = defaults.string(forKey: Keys.taskID).flatMap(UUID.init)
@@ -205,6 +316,7 @@ final class FocusTimerController: ObservableObject {
     /// install, cleared defaults), show it as the running session.
     private func adoptHelperLockIfNeeded() async {
         guard let end = await blocker.helperLockEndDate(), end > Date(), !isRunning else { return }
+        mode = .timer
         startDate = Date()
         endDate = end
         isLockedSession = true
@@ -234,6 +346,10 @@ final class FocusTimerController: ObservableObject {
     }
 
     private func tick() {
+        guard let startDate else { return }
+        elapsed = Date().timeIntervalSince(startDate)
+        // A stopwatch has no deadline to run down, so the whole countdown
+        // below — expiry, overtime, the helper health check — is moot.
         guard let endDate else { return }
         let left = endDate.timeIntervalSinceNow
         remaining = max(0, left)
@@ -285,7 +401,7 @@ final class FocusTimerController: ObservableObject {
     /// old deadline, so "extend 10 minutes" always buys ten more minutes
     /// rather than however much is left after the overtime.
     func extend(by minutes: Int) {
-        guard isRunning, minutes > 0 else { return }
+        guard isRunning, minutes > 0, mode == .timer else { return }
         // A lock that's still in force can't be lengthened: the helper refuses
         // a second startLockedSession while one is active, so the app would
         // end up counting toward a deadline the helper had already released,
@@ -337,12 +453,16 @@ final class FocusTimerController: ObservableObject {
 
     private func finish(completed: Bool, notify: Bool = true, endingAt: Date? = nil) {
         blocker.isSessionManaged = false
-        guard let end = endDate else { return }
+        // Keyed on the start, not the end: a stopwatch has no end date, and
+        // guarding on one here used to mean it could never be finished at all.
+        guard let start = startDate else { return }
         ticker?.invalidate()
         ticker = nil
 
-        let sessionEnd = endingAt ?? (completed ? end : Date())
-        let minutes = sessionEnd.timeIntervalSince(startDate ?? sessionEnd) / 60
+        // A completed timer is credited to its deadline; anything else — a
+        // stopwatch, or a session given up on — to the moment it stopped.
+        let sessionEnd = endingAt ?? ((completed ? endDate : nil) ?? Date())
+        let minutes = sessionEnd.timeIntervalSince(start) / 60
         stats.record(minutes: minutes, completed: completed,
                      course: currentTaskCourse, taskTitle: currentTaskTitle)
 
@@ -350,14 +470,16 @@ final class FocusTimerController: ObservableObject {
         endDate = nil
         startDate = nil
         remaining = 0
+        elapsed = 0
         overtime = 0
+        mode = .timer
         isAwaitingConfirmation = false
         isLockedSession = false
         currentTaskID = nil
         currentTaskTitle = nil
         currentTaskCourse = nil
         for key in [Keys.end, Keys.start, Keys.blockingWasOn, Keys.locked,
-                    Keys.taskID, Keys.taskTitle, Keys.taskCourse] {
+                    Keys.taskID, Keys.taskTitle, Keys.taskCourse, Keys.mode] {
             UserDefaults.standard.removeObject(forKey: key)
         }
 
