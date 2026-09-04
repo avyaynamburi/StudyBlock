@@ -104,21 +104,45 @@ struct CanvasTests {
               "23:59Z renders as 18:59 local on Dec 1 in New York",
               "got \(dueParts.month ?? 0)/\(dueParts.day ?? 0) \(dueParts.hour ?? 0):\(dueParts.minute ?? 0)")
 
-        print("\nupcoming filter")
+        print("\nimport window")
         let farFuture = newYork.date(from: DateComponents(year: 2099, month: 1, day: 1))!
-        let future = CanvasNormalizer.upcoming(items, now: farFuture, calendar: newYork)
+        let future = CanvasNormalizer.recentOrUpcoming(items, now: farFuture, calendar: newYork)
         check(!future.contains { $0.title == "Ancient homework" },
-              "an assignment due in 2020 is filtered out")
-        equal(future.count, 6, "everything else still upcoming")
+              "an assignment due in 2020 is far outside the window")
+        equal(future.count, 6, "everything else is in")
 
         // The morning of Reading Day, after midnight UTC has already passed.
         let thatMorning = newYork.date(from: DateComponents(
             year: 2099, month: 12, day: 15, hour: 8))!
-        let stillThere = CanvasNormalizer.upcoming(items, now: thatMorning, calendar: newYork)
+        let stillThere = CanvasNormalizer.recentOrUpcoming(items, now: thatMorning, calendar: newYork)
         check(stillThere.contains { $0.title == "Reading Day" },
               "all-day item survives the morning it matters (no premature expiry)")
-        check(!stillThere.contains { $0.title == "Problem Set 5" },
-              "a timed assignment two weeks past is gone by then")
+
+        print("\noverdue work is kept, not dropped")
+        // Problem Set 5 is due Dec 1; two weeks later it is overdue but very
+        // much still something you owe.
+        check(stillThere.contains { $0.title == "Problem Set 5" },
+              "an assignment two weeks overdue is still imported")
+        let longAfter = newYork.date(from: DateComponents(year: 2100, month: 2, day: 1))!
+        let stale = CanvasNormalizer.recentOrUpcoming(items, now: longAfter, calendar: newYork)
+        check(!stale.contains { $0.title == "Problem Set 5" },
+              "but two months overdue is outside the 30-day window")
+
+        print("\nthe window boundary, to the day")
+        // Reading Day is an all-day entry on Dec 15: exactly 30 days later it
+        // is the oldest thing still in, and a day after that it is out.
+        let day30 = newYork.date(from: DateComponents(year: 2100, month: 1, day: 14, hour: 9))!
+        let day31 = newYork.date(from: DateComponents(year: 2100, month: 1, day: 15, hour: 9))!
+        check(CanvasNormalizer.recentOrUpcoming(items, now: day30, calendar: newYork)
+                .contains { $0.title == "Reading Day" },
+              "an all-day item exactly 30 days old is still in")
+        check(!CanvasNormalizer.recentOrUpcoming(items, now: day31, calendar: newYork)
+                .contains { $0.title == "Reading Day" },
+              "31 days old is out")
+        check(CanvasNormalizer.recentOrUpcoming(items, now: thatMorning, lookbackDays: 0,
+                                                calendar: newYork)
+                .contains { $0.title == "Reading Day" },
+              "with no lookback at all, today's all-day item is still kept")
 
         print("\ncontent hash")
         let a = items.first { $0.title == "Problem Set 5" }!

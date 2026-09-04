@@ -144,27 +144,42 @@ enum CanvasNormalizer {
         }
     }
 
-    /// Drops anything already in the past.
+    /// How far back the import reaches. Canvas's own feed only carries about
+    /// 30 days of past events, so a longer window would buy nothing.
+    static let defaultLookbackDays = 30
+
+    /// What belongs on the board: everything still to come, plus recent work
+    /// that is already overdue.
+    ///
+    /// Overdue assignments are the point of the lookback. A strictly-future
+    /// filter reads sensibly for a morning briefing, where a passed deadline
+    /// is noise — but on a to-do board an assignment you haven't submitted is
+    /// the most urgent card you own, and dropping it means a course whose
+    /// deadlines all passed before you first synced never appears at all.
     ///
     /// An all-day entry is compared by calendar date, never by instant. Left
-    /// as an instant comparison it would be dropped at midnight UTC — which
-    /// is to say, it would vanish on the very morning it mattered.
-    static func upcoming(_ items: [CanvasItem], now: Date = Date(),
-                         calendar: Calendar = .current) -> [CanvasItem] {
+    /// as an instant comparison it would fall out of the window at midnight
+    /// UTC — which is to say, it would vanish on the very morning it mattered.
+    static func recentOrUpcoming(_ items: [CanvasItem], now: Date = Date(),
+                                 lookbackDays: Int = defaultLookbackDays,
+                                 calendar: Calendar = .current) -> [CanvasItem] {
         let today = calendar.startOfDay(for: now)
+        guard let cutoff = calendar.date(byAdding: .day, value: -max(0, lookbackDays), to: today) else {
+            return items
+        }
         return items.filter { item in
             switch item.when {
             case nil:
                 return false
             case .instant(let instant):
-                return instant >= now
+                return instant >= cutoff
             case .day(let year, let month, let day):
                 var components = DateComponents()
                 components.year = year
                 components.month = month
                 components.day = day
                 guard let date = calendar.date(from: components) else { return false }
-                return calendar.startOfDay(for: date) >= today
+                return calendar.startOfDay(for: date) >= cutoff
             }
         }
     }

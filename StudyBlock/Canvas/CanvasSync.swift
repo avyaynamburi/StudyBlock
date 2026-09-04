@@ -97,7 +97,7 @@ final class CanvasSync: ObservableObject {
                 return .failure(.noEvents)
             }
 
-            let items = CanvasNormalizer.upcoming(CanvasNormalizer.normalize(events))
+            let items = CanvasNormalizer.recentOrUpcoming(CanvasNormalizer.normalize(events))
             let summary = store.mergeCanvas(items, includeEvents: importsEvents)
             registerCategoryColors(in: store)
 
