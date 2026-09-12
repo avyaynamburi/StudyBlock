@@ -16,6 +16,33 @@ enum FocusMode: String, CaseIterable, Identifiable {
     var icon: String { self == .timer ? "timer" : "stopwatch" }
 }
 
+/// A finished session, waiting on the only question it can't answer itself:
+/// is the thing you were working on actually done?
+struct FinishedSessionPrompt: Identifiable, Equatable {
+    let id = UUID()
+    var taskID: UUID
+    var taskTitle: String
+    var minutes: Int
+}
+
+/// Where a session found the task it is timing, so the board can put it back
+/// there afterwards.
+///
+/// A task is in Currently Doing for exactly as long as something is being
+/// done: the session moves it there on the way in and returns it on the way
+/// out. Without the return, Currently Doing silently becomes a second backlog
+/// of everything you have ever started.
+struct SessionTaskPlacement: Identifiable, Equatable {
+    let id = UUID()
+    var taskID: UUID
+    var column: TaskColumn
+    /// Whether the card was manually placed before the session took it. A
+    /// session moving a card is not the user placing it, so this is restored
+    /// too — otherwise every session quietly opts its task out of automatic
+    /// column promotion for good.
+    var wasManual: Bool
+}
+
 /// Drives focus sessions: countdown, auto-block on start, auto-unblock on
 /// end, stats recording, and completion notification. Sessions can be
 /// **locked** (helper-enforced: no early unblock, hosts tampering reverted)
@@ -36,7 +63,14 @@ final class FocusTimerController: ObservableObject {
     /// modes — the timer uses it to credit overtime, the stopwatch shows it.
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var isLockedSession = false
+    /// The task this session is timing, if any. Published so the rest of the
+    /// app can tell whether something that just happened to a task happened
+    /// to *this* one.
+    @Published private(set) var currentTaskID: UUID?
     @Published private(set) var currentTaskTitle: String?
+    /// Where this session's task was before the session moved it into
+    /// Currently Doing.
+    private var currentTaskPlacement: SessionTaskPlacement?
     @Published private(set) var currentTaskCourse: String?
     /// Set when a locked session's safety valve trips (see `pollHelperHealth`).
     /// Stays set — surfaced as a banner — until the user acknowledges it.
@@ -48,11 +82,22 @@ final class FocusTimerController: ObservableObject {
     @Published private(set) var isAwaitingConfirmation = false
     /// How long the session has been sitting past its deadline.
     @Published private(set) var overtime: TimeInterval = 0
+    /// Set when a task-linked session ends by being *finished* — the app then
+    /// has one question worth asking, and exactly one moment at which asking
+    /// it isn't an interruption.
+    ///
+    /// Published rather than handled here because the answer moves a task
+    /// between columns, and this controller has no business holding the
+    /// board. It is cleared by whoever presents the question.
+    @Published var finishedPrompt: FinishedSessionPrompt?
+    /// Published when a task-linked session ends, for the board to act on.
+    /// Set for *every* ending — finished, given up on, or cut short — because
+    /// the task belongs back where it came from either way.
+    @Published var taskToRestore: SessionTaskPlacement?
 
     private let blocker: BlockerViewModel
     private let stats: StatsStore
     private var startDate: Date?
-    private var currentTaskID: UUID?
     private var blockingWasOnBefore = false
     private var ticker: Timer?
     /// Last time the helper actually answered a health check during a locked
@@ -73,6 +118,8 @@ final class FocusTimerController: ObservableObject {
         static let taskID = "focusTaskID"
         static let taskTitle = "focusTaskTitle"
         static let taskCourse = "focusTaskCourse"
+        static let taskColumn = "focusTaskColumn"
+        static let taskColumnManual = "focusTaskColumnManual"
         static let lastMinutes = "focusLastMinutes"
         static let mode = "focusSessionMode"
     }
@@ -194,6 +241,17 @@ final class FocusTimerController: ObservableObject {
         finish(completed: true, notify: false, endingAt: Date())
     }
 
+    /// Stops a stopwatch because its task has just been ticked off.
+    ///
+    /// Banks the time exactly like `stopStopwatch`, but hands the task back
+    /// to nobody: "is it done?" was answered the moment the user checked the
+    /// box, and restoring the card's old column would drag it straight back
+    /// out of Completed.
+    func stopStopwatchForCompletedTask() {
+        guard isRunning, mode == .stopwatch else { return }
+        finish(completed: true, notify: false, endingAt: Date(), askIfDone: false)
+    }
+
     /// Ends a *locked* session early. Only call this after the typed-challenge
     /// override has already passed — it exists specifically so that check has
     /// somewhere real to lead. Tells the helper to drop its enforcement first;
@@ -244,6 +302,12 @@ final class FocusTimerController: ObservableObject {
         currentTaskID = task?.id
         currentTaskTitle = task?.title
         currentTaskCourse = task?.course
+        // Read off the task itself rather than asked of the caller: every
+        // route into a session already hands over the whole task, and a
+        // caller that had to remember this is a caller that will forget.
+        currentTaskPlacement = task.map {
+            SessionTaskPlacement(taskID: $0.id, column: $0.column, wasManual: $0.columnIsManual)
+        }
 
         let defaults = UserDefaults.standard
         defaults.set(end, forKey: Keys.end)
@@ -253,6 +317,8 @@ final class FocusTimerController: ObservableObject {
         defaults.set(task?.id.uuidString, forKey: Keys.taskID)
         defaults.set(task?.title, forKey: Keys.taskTitle)
         defaults.set(task?.course, forKey: Keys.taskCourse)
+        defaults.set(task?.column.rawValue, forKey: Keys.taskColumn)
+        defaults.set(task?.columnIsManual ?? false, forKey: Keys.taskColumnManual)
         defaults.set(mode.rawValue, forKey: Keys.mode)
         // Only a real duration is worth remembering as the default next time.
         if mode == .timer { defaults.set(minutes, forKey: Keys.lastMinutes) }
@@ -276,6 +342,7 @@ final class FocusTimerController: ObservableObject {
             currentTaskID = defaults.string(forKey: Keys.taskID).flatMap(UUID.init)
             currentTaskTitle = defaults.string(forKey: Keys.taskTitle)
             currentTaskCourse = defaults.string(forKey: Keys.taskCourse)
+            restorePersistedPlacement()
             blocker.isSessionManaged = true
             startTicker()
             return
@@ -293,6 +360,7 @@ final class FocusTimerController: ObservableObject {
         currentTaskID = defaults.string(forKey: Keys.taskID).flatMap(UUID.init)
         currentTaskTitle = defaults.string(forKey: Keys.taskTitle)
         currentTaskCourse = defaults.string(forKey: Keys.taskCourse)
+        restorePersistedPlacement()
         endDate = end
         if end <= Date() {
             // Elapsed while the app was closed. A task session comes back
@@ -310,6 +378,18 @@ final class FocusTimerController: ObservableObject {
             if isLockedSession { beginHelperHealthTracking() }
             startTicker()
         }
+    }
+
+    /// Picks the task's original spot back up after a relaunch, so a session
+    /// restored from disk still knows where to put its task when it ends.
+    private func restorePersistedPlacement() {
+        let defaults = UserDefaults.standard
+        guard let taskID = currentTaskID else { return }
+        let column = defaults.string(forKey: Keys.taskColumn)
+            .flatMap(TaskColumn.init(rawValue:)) ?? .doing
+        currentTaskPlacement = SessionTaskPlacement(
+            taskID: taskID, column: column,
+            wasManual: defaults.bool(forKey: Keys.taskColumnManual))
     }
 
     /// If the helper is enforcing a lock this app doesn't know about (fresh
@@ -451,7 +531,8 @@ final class FocusTimerController: ObservableObject {
         helperStuckWarning = false
     }
 
-    private func finish(completed: Bool, notify: Bool = true, endingAt: Date? = nil) {
+    private func finish(completed: Bool, notify: Bool = true, endingAt: Date? = nil,
+                        askIfDone: Bool = true) {
         blocker.isSessionManaged = false
         // Keyed on the start, not the end: a stopwatch has no end date, and
         // guarding on one here used to mean it could never be finished at all.
@@ -466,6 +547,16 @@ final class FocusTimerController: ObservableObject {
         stats.record(minutes: minutes, completed: completed,
                      course: currentTaskCourse, taskTitle: currentTaskTitle)
 
+        // Asked only of a session that ran its course. One given up on has
+        // already answered the question.
+        if askIfDone, let placement = currentTaskPlacement {
+            taskToRestore = placement
+            if completed, let taskID = currentTaskID, let title = currentTaskTitle {
+                finishedPrompt = FinishedSessionPrompt(taskID: taskID, taskTitle: title,
+                                                       minutes: max(1, Int(minutes.rounded())))
+            }
+        }
+
         let wasLocked = isLockedSession
         endDate = nil
         startDate = nil
@@ -478,8 +569,10 @@ final class FocusTimerController: ObservableObject {
         currentTaskID = nil
         currentTaskTitle = nil
         currentTaskCourse = nil
+        currentTaskPlacement = nil
         for key in [Keys.end, Keys.start, Keys.blockingWasOn, Keys.locked,
-                    Keys.taskID, Keys.taskTitle, Keys.taskCourse, Keys.mode] {
+                    Keys.taskID, Keys.taskTitle, Keys.taskCourse, Keys.mode,
+                    Keys.taskColumn, Keys.taskColumnManual] {
             UserDefaults.standard.removeObject(forKey: key)
         }
 

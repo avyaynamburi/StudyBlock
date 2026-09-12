@@ -96,6 +96,7 @@ struct TasksView: View {
                           onDeleteSeries: target.task.seriesID == nil || target.isNew
                               ? nil : { store.deleteSeries(containing: target.task) },
                           courseColor: { store.color(for: $0) },
+                          suggestedHue: store.nextCategoryHue,
                           onCreateCategory: { name, hue in store.setHue(hue, for: name) })
         }
         .sheet(item: $timerPromptTask) { task in
@@ -150,6 +151,7 @@ struct TasksView: View {
                 }
             CategoryPickerButton(selection: $quickAddCourse, courses: store.courses,
                                   courseColor: { store.color(for: $0) },
+                                  suggestedHue: store.nextCategoryHue,
                                   onCreateCategory: { name, hue in store.setHue(hue, for: name) })
             Button(action: pasteTasksFromClipboard) {
                 Image(systemName: "doc.on.clipboard")
@@ -851,18 +853,20 @@ private struct BoardColumn: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(tasks) { task in
-                        TaskCard(task: task,
-                                 column: column,
-                                 showFocusButton: column == .backlog || column == .upcoming,
-                                 courseColor: courseColor,
-                                 onToggle: { onToggle(task) },
-                                 onFocus: timerRunning ? nil : { onFocus(task) },
-                                 onReorder: { droppedID in onReorder(droppedID, task.id) },
-                                 onSelect: { onSelect(task) },
-                                 onMove: { target in onMove(task.id, target) },
-                                 onMergeDrop: { droppedID in onMergeDrop(droppedID, task.id) },
-                                 onMergePick: { onMergePick(task) })
+                    // Only the Completed column is cut into sections; the
+                    // others are about what's left to do, where the date a
+                    // card was finished doesn't exist yet.
+                    if column == .completed {
+                        ForEach(CompletedSections.split(tasks)) { group in
+                            sectionHeader(group)
+                            ForEach(group.tasks) { task in
+                                card(for: task)
+                            }
+                        }
+                    } else {
+                        ForEach(tasks) { task in
+                            card(for: task)
+                        }
                     }
                     if tasks.isEmpty {
                         Text(emptyMessage)
@@ -887,6 +891,40 @@ private struct BoardColumn: View {
         } isTargeted: { targeted in
             isTargeted = targeted
         }
+    }
+
+    private func card(for task: TodoItem) -> some View {
+        TaskCard(task: task,
+                 column: column,
+                 showFocusButton: column == .backlog || column == .upcoming,
+                 courseColor: courseColor,
+                 onToggle: { onToggle(task) },
+                 onFocus: timerRunning ? nil : { onFocus(task) },
+                 onReorder: { droppedID in onReorder(droppedID, task.id) },
+                 onSelect: { onSelect(task) },
+                 onMove: { target in onMove(task.id, target) },
+                 onMergeDrop: { droppedID in onMergeDrop(droppedID, task.id) },
+                 onMergePick: { onMergePick(task) })
+    }
+
+    /// A rule with a name on it, not a second column header — the cards under
+    /// it are still the same list, dragged and dropped the same way.
+    private func sectionHeader(_ group: CompletedGroup) -> some View {
+        HStack(spacing: 6) {
+            Text(group.section.rawValue)
+                .font(Theme.ui(9, .semibold))
+                .textCase(.uppercase)
+                .kerning(0.4)
+                .foregroundStyle(.secondary)
+            Text("\(group.tasks.count)")
+                .font(Theme.ui(9, .semibold))
+                .foregroundStyle(.tertiary)
+            Rectangle()
+                .fill(Theme.stroke)
+                .frame(height: 1)
+        }
+        .padding(.top, group.section == .today ? 0 : 8)
+        .padding(.bottom, 2)
     }
 
     private var emptyMessage: String {
@@ -1200,130 +1238,14 @@ struct TaskCard: View {
     }
 }
 
-// MARK: - Confetti
-
-/// Full-page celebration: a fresh burst of pieces rains down across the
-/// whole Tasks view every time `trigger` changes, regardless of where on
-/// the board the completed task was.
-private struct ScreenConfettiOverlay: View {
-    let trigger: Int
-    @State private var pieces: [ScreenConfettiPiece] = []
-    @State private var animate = false
-    /// Identifies the burst in flight, so a burst that ends while a newer one
-    /// is running doesn't sweep the newer one's pieces off the screen.
-    @State private var burst = 0
-
-    /// Longest a burst can last: the last piece to launch, falling slowest.
-    private static let maxLifetime = ScreenConfettiPiece.maxDelay + ScreenConfettiPiece.maxDuration
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                ForEach(pieces) { piece in
-                    shape(for: piece)
-                        .rotationEffect(.degrees(animate ? piece.endRotation : piece.startRotation))
-                        .rotation3DEffect(.degrees(animate ? piece.tumble : 0), axis: piece.axis)
-                        .position(x: (animate ? piece.endX : piece.startX) * proxy.size.width,
-                                  y: animate ? proxy.size.height + 40 : -30)
-                        // Each piece carries its own curve, delay and duration.
-                        // This modifier is what makes them independent — the
-                        // single shared `withAnimation` this replaced moved all
-                        // of them on one clock, which is why the burst looked
-                        // like one line sweeping down the screen.
-                        .animation(.easeIn(duration: piece.duration).delay(piece.delay), value: animate)
-                        // Applied below the animation above, so it governs only
-                        // the fade: pieces stay solid on the way down and go out
-                        // near the end of their own fall rather than all at once.
-                        .opacity(animate ? 0 : 1)
-                        .animation(.easeOut(duration: 0.45)
-                            .delay(piece.delay + piece.duration - 0.45), value: animate)
-                }
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .onChange(of: trigger) { _ in fire() }
-        }
-        .allowsHitTesting(false)
-    }
-
-    @ViewBuilder
-    private func shape(for piece: ScreenConfettiPiece) -> some View {
-        if piece.isRound {
-            Circle()
-                .fill(piece.color)
-                .frame(width: piece.size, height: piece.size)
-        } else {
-            RoundedRectangle(cornerRadius: 1.5)
-                .fill(piece.color)
-                .frame(width: piece.size, height: piece.size * 0.45)
-        }
-    }
-
-    private func fire() {
-        burst += 1
-        let current = burst
-        pieces = (0..<110).map { _ in ScreenConfettiPiece() }
-        animate = false
-        // Deferred a tick so SwiftUI sees false → true as a real change, and
-        // set plainly rather than inside `withAnimation`, which would override
-        // every piece's own animation with one shared curve.
-        DispatchQueue.main.async { animate = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.maxLifetime + 0.3) {
-            guard current == burst else { return }
-            pieces = []
-            animate = false
-        }
-    }
-}
-
-private struct ScreenConfettiPiece: Identifiable {
-    static let maxDelay = 0.6
-    static let maxDuration = 2.1
-
-    let id = UUID()
-    let color: Color
-    /// Start and end as fractions of the overlay's width: a piece drifts
-    /// sideways on the way down instead of dropping down a fixed rail.
-    let startX: CGFloat
-    let endX: CGFloat
-    let size: CGFloat
-    /// A quarter of the pieces are round, so the burst isn't 110 identical
-    /// rectangles.
-    let isRound: Bool
-    let startRotation: Double
-    let endRotation: Double
-    /// Tumble through a random 3D axis — a piece that turns edge-on and
-    /// briefly disappears reads as paper rather than a falling brick.
-    let tumble: Double
-    let axis: (x: CGFloat, y: CGFloat, z: CGFloat)
-    /// Staggered launch and an individual fall time. These two are the whole
-    /// difference between confetti and a curtain.
-    let delay: Double
-    let duration: Double
-
-    init() {
-        let colors: [Color] = [Theme.accent, Theme.violet, Theme.success, Theme.amber, Theme.danger]
-        color = colors.randomElement() ?? Theme.accent
-        startX = CGFloat.random(in: 0.02...0.98)
-        // Clamped loosely rather than to 0...1: a piece is allowed to drift
-        // off the edge, which looks better than one sliding along it.
-        endX = min(1.08, max(-0.08, startX + CGFloat.random(in: -0.16...0.16)))
-        size = CGFloat.random(in: 5...12)
-        isRound = Double.random(in: 0...1) < 0.25
-        startRotation = Double.random(in: 0...360)
-        endRotation = startRotation + Double.random(in: 240...900)
-        tumble = Double.random(in: 360...1440)
-        axis = (CGFloat.random(in: 0...1), CGFloat.random(in: 0...1), CGFloat.random(in: 0.2...1))
-        delay = Double.random(in: 0...Self.maxDelay)
-        duration = Double.random(in: 1.1...Self.maxDuration)
-    }
-}
-
 // MARK: - Category picker
 
 private struct CategoryPickerButton: View {
     @Binding var selection: String?
     let courses: [String]
     var courseColor: (String) -> Color = { _ in Theme.accent }
+    /// The hue the new-category sheet opens on — the board's next unused one.
+    var suggestedHue: Double = Theme.categoryHue(index: 0)
     var onCreateCategory: (_ name: String, _ hue: Double) -> Void = { _, _ in }
 
     @State private var showingNewCategory = false
@@ -1360,7 +1282,7 @@ private struct CategoryPickerButton: View {
         .buttonStyle(SoftPillButtonStyle(tint: selection.map(courseColor)))
         .fixedSize()
         .sheet(isPresented: $showingNewCategory) {
-            NewCategorySheet { name, hue in
+            NewCategorySheet(initialHue: suggestedHue) { name, hue in
                 onCreateCategory(name, hue)
                 selection = name
             }
@@ -1374,9 +1296,17 @@ private struct CategoryPickerButton: View {
 private struct NewCategorySheet: View {
     let onAdd: (_ name: String, _ hue: Double) -> Void
 
+    init(initialHue: Double, onAdd: @escaping (_ name: String, _ hue: Double) -> Void) {
+        self.onAdd = onAdd
+        _hue = State(initialValue: initialHue)
+    }
+
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
-    @State private var hue: Double = Theme.categoryHueSteps.first ?? 0
+    /// Opens on the colour the board would hand out next, so accepting the
+    /// default is already the distinct choice and the swatches are there to
+    /// overrule it, not to make the decision.
+    @State private var hue: Double
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1392,7 +1322,12 @@ private struct NewCategorySheet: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Color").font(Theme.ui(10)).foregroundStyle(.secondary)
-                HStack(spacing: 10) {
+                // Two rows of six, not one row of twelve: twelve 24pt
+                // swatches with their gaps need ~400pt, half again as wide
+                // as this sheet, and a fixed-width sheet doesn't grow to fit
+                // them — it clips them, and the title and field with them.
+                LazyVGrid(columns: Array(repeating: GridItem(spacing: 10), count: 6),
+                          spacing: 10) {
                     ForEach(Theme.categoryHueSteps, id: \.self) { step in
                         Circle()
                             .fill(Theme.categoryPastel(hue: step))
@@ -1642,6 +1577,8 @@ struct TaskEditSheet: View {
     /// there instead of asking a pointless question.
     var onDeleteSeries: (() -> Void)?
     var courseColor: (String) -> Color = { _ in Theme.accent }
+    /// Handed straight to the category picker — see `CategoryPickerButton`.
+    var suggestedHue: Double = Theme.categoryHue(index: 0)
     var onCreateCategory: (_ name: String, _ hue: Double) -> Void = { _, _ in }
 
     @Environment(\.dismiss) private var dismiss
@@ -1670,6 +1607,7 @@ struct TaskEditSheet: View {
          onSave: @escaping (TaskPlan) -> Void,
          onDelete: (() -> Void)? = nil, onDeleteSeries: (() -> Void)? = nil,
          courseColor: @escaping (String) -> Color = { _ in Theme.accent },
+         suggestedHue: Double = Theme.categoryHue(index: 0),
          onCreateCategory: @escaping (_ name: String, _ hue: Double) -> Void = { _, _ in }) {
         self.task = task
         self.isNew = isNew
@@ -1680,6 +1618,7 @@ struct TaskEditSheet: View {
         self.onDelete = onDelete
         self.onDeleteSeries = onDeleteSeries
         self.courseColor = courseColor
+        self.suggestedHue = suggestedHue
         self.onCreateCategory = onCreateCategory
 
         _title = State(initialValue: task.title)
@@ -1865,7 +1804,8 @@ struct TaskEditSheet: View {
                 Text("Category").font(Theme.ui(12)).foregroundStyle(.secondary)
                 Spacer()
                 CategoryPickerButton(selection: $course, courses: courses,
-                                     courseColor: courseColor, onCreateCategory: onCreateCategory)
+                                     courseColor: courseColor, suggestedHue: suggestedHue,
+                                     onCreateCategory: onCreateCategory)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)

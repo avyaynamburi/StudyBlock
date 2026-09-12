@@ -4,8 +4,23 @@ import SwiftUI
 @MainActor
 final class TaskStore: ObservableObject {
     @Published var items: [TodoItem] = [] {
-        didSet { JSONStore.save(items, to: "tasks.json") }
+        didSet {
+            JSONStore.save(items, to: "tasks.json")
+            // Every category that reaches the board gets a colour here, not
+            // at each of the half-dozen places one can be created — quick-add
+            // `#tag`, the edit sheet, CSV import, a Canvas sync. One rule,
+            // enforced where they all converge.
+            assignMissingHues()
+        }
     }
+
+    /// The task most recently ticked off, whichever way it was done — the
+    /// checkbox, a drag into Completed, an import.
+    ///
+    /// Published so a running focus session can notice that the thing it is
+    /// timing has just been finished. The store deliberately knows nothing
+    /// about the timer; it only says what happened.
+    @Published private(set) var lastCompletedTaskID: UUID?
 
     /// Category name -> hue (0..<360), chosen when the category is created.
     /// A category without an entry (e.g. typed via a `#tag` before this
@@ -15,8 +30,13 @@ final class TaskStore: ObservableObject {
     }
 
     init() {
-        items = JSONStore.load([TodoItem].self, from: "tasks.json") ?? []
+        // Colours first: loading the board assigns one to every category that
+        // hasn't got one, and that has to see the hues already on disk or it
+        // would hand out duplicates and overwrite the user's own choices.
         courseHues = JSONStore.load([String: Double].self, from: "courseColors.json") ?? [:]
+        dropLegacyCanvasHues()
+        resolveDuplicateHues()
+        items = JSONStore.load([TodoItem].self, from: "tasks.json") ?? []
         dropDuplicateIDs()
         migrateLegacySeries()
         recomputeAutoColumns()
@@ -81,6 +101,78 @@ final class TaskStore: ObservableObject {
         courseHues[course] = hue
     }
 
+    /// Canvas imports used to be seeded with two fixed hues that sit off the
+    /// picker's stops entirely. Dropping exactly those two values — nothing
+    /// else, and only when they are untouched — lets the ladder below
+    /// re-colour them like any other category. A hue the user has since
+    /// picked differs from the seed and so survives.
+    private func dropLegacyCanvasHues() {
+        for (course, seed) in [(Self.canvasCategory, 28.0), (Self.canvasEventCategory, 268.0)]
+        where courseHues[course] == seed {
+            courseHues.removeValue(forKey: course)
+        }
+    }
+
+    /// Moves a category that shares a colour with another onto a free one.
+    ///
+    /// Nothing stopped two categories being given the same hue before this —
+    /// the picker will still happily offer a colour already in use — and a
+    /// board that reached that state reads as though two subjects were one.
+    /// The first holder in name order keeps the colour; whoever else has it
+    /// is moved. Runs at load and is idempotent: once there are no
+    /// duplicates left it does nothing on every launch after.
+    private func resolveDuplicateHues() {
+        var taken = Set<Double>()
+        var resolved = courseHues
+        var index = 0
+        for course in courseHues.keys.sorted() {
+            guard let hue = courseHues[course] else { continue }
+            guard taken.contains(hue) else {
+                taken.insert(hue)
+                continue
+            }
+            while taken.contains(Theme.categoryHue(index: index)) { index += 1 }
+            let replacement = Theme.categoryHue(index: index)
+            resolved[course] = replacement
+            taken.insert(replacement)
+        }
+        guard resolved != courseHues else { return }
+        courseHues = resolved
+    }
+
+    /// Gives every category on the board a hue from `Theme.categoryHue`,
+    /// skipping any already in use, so no two categories share a colour until
+    /// the wheel genuinely runs out.
+    ///
+    /// New categories are served in name order, which is arbitrary but
+    /// stable: the same board reloaded twice colours the same way.
+    private func assignMissingHues() {
+        let missing = courses.filter { courseHues[$0] == nil }
+        guard !missing.isEmpty else { return }
+        var taken = Set(courseHues.values)
+        var assigned = courseHues
+        var index = 0
+        for course in missing {
+            while taken.contains(Theme.categoryHue(index: index)) { index += 1 }
+            let hue = Theme.categoryHue(index: index)
+            assigned[course] = hue
+            taken.insert(hue)
+        }
+        // One assignment, so the save behind `courseHues` runs once for a
+        // whole Canvas sync rather than once per new course.
+        courseHues = assigned
+    }
+
+    /// The colour a category created right now would get — what the new
+    /// category sheet opens on, so a hand-made category is as distinct from
+    /// the rest as an imported one.
+    var nextCategoryHue: Double {
+        let taken = Set(courseHues.values)
+        var index = 0
+        while taken.contains(Theme.categoryHue(index: index)) { index += 1 }
+        return Theme.categoryHue(index: index)
+    }
+
     /// The color every task/chip for this category should use — the
     /// user-picked hue if set, otherwise a stable hash-derived fallback so
     /// every category still has *a* color.
@@ -88,11 +180,16 @@ final class TaskStore: ObservableObject {
         Theme.categoryInk(hue: hue(for: course))
     }
 
+    /// A category with no assigned hue is a category that has never been on
+    /// the board — a name typed into the editor and not yet saved, say.
+    /// `assignMissingHues` will give it a real slot the moment it lands, so
+    /// all this needs to do is be stable and on-palette in the meantime;
+    /// picking by hash is what keeps it from flickering as the name is typed.
     private func hue(for course: String) -> Double {
         if let stored = courseHues[course] { return stored }
         var hash: UInt64 = 5381
         for byte in course.lowercased().utf8 { hash = hash &* 33 &+ UInt64(byte) }
-        return Double(hash % 360)
+        return Theme.categoryHue(index: Int(hash % 48))
     }
 
     // MARK: - CSV
@@ -199,6 +296,26 @@ final class TaskStore: ObservableObject {
         guard !created.isEmpty else { return 0 }
         items.append(contentsOf: created)
         return created.count
+    }
+
+    /// Creates a plain, undated task already sitting in Currently Doing, and
+    /// hands it straight back.
+    ///
+    /// This is what "I'm working on something that isn't on the board yet"
+    /// needs: `add` returns a count because a repeat rule can make many tasks
+    /// at once, and a focus session has to link to exactly one. The card is
+    /// marked as manually placed because the user did place it — by starting
+    /// a session on it.
+    @discardableResult
+    func addWorkingOn(title: String, course: String? = nil) -> TodoItem? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        var task = TodoItem(title: trimmed, course: course)
+        task.column = .doing
+        task.columnIsManual = true
+        task.manualOrder = TodoItem.dateOrderValue(for: nil)
+        items.append(task)
+        return task
     }
 
     /// Saves an edit to a single task. Turning on a repeat rule for a task
@@ -346,8 +463,10 @@ final class TaskStore: ObservableObject {
 
     // MARK: - Canvas
 
-    /// The one category every imported assignment lands in, so Canvas work is
-    /// filterable as a group and visibly distinct from tasks you wrote.
+    /// Where an imported assignment lands when the feed gave no course to
+    /// tag it with. Ordinary Canvas work is tagged with its own course code
+    /// instead, so it files alongside anything you wrote for that course;
+    /// this is only the catch-all for a summary with no `[PHYS 221]` on it.
     static let canvasCategory = "Canvas"
 
     struct CanvasSyncSummary: Equatable {
@@ -391,10 +510,10 @@ final class TaskStore: ObservableObject {
     /// have completed, and it never deletes a task that has dropped out of
     /// the feed. Both would destroy your own work on the strength of a feed
     /// Canvas only regenerates on a cache interval.
-    /// The category course events land in when `includeEvents` is on. Kept
-    /// separate from the assignment category so the feed's due/starts
-    /// distinction survives onto the board — an event is something that
-    /// starts, never something that is "due".
+    /// The same catch-all for course events, when `includeEvents` is on and
+    /// the entry carried no course. Kept separate from the assignment
+    /// fallback so the feed's due/starts distinction survives onto the board
+    /// — an event is something that starts, never something that is "due".
     static let canvasEventCategory = "Canvas Events"
 
     @discardableResult
@@ -416,10 +535,16 @@ final class TaskStore: ObservableObject {
             }
             guard let when = item.when,
                   let due = CanvasNormalizer.localDueDate(when, calendar: calendar) else { continue }
-            let category = item.kind == .assignment ? Self.canvasCategory : Self.canvasEventCategory
+            // The course code is the tag. An assignment then sits with the
+            // rest of that course's work rather than in one undifferentiated
+            // Canvas pile, and the course filter and per-course colours —
+            // which already exist for tasks you write — start working on
+            // imported work for free.
+            let category = item.course
+                ?? (item.kind == .assignment ? Self.canvasCategory : Self.canvasEventCategory)
 
             guard let index = existing[item.sourceID] else {
-                var task = TodoItem(title: item.qualifiedTitle,
+                var task = TodoItem(title: item.title,
                                     course: category,
                                     dueDate: due)
                 task.canvasUID = item.sourceID
@@ -438,7 +563,10 @@ final class TaskStore: ObservableObject {
 
             var task = self.items[index]
             let previousDue = task.dueDate
-            task.title = item.qualifiedTitle
+            // The course prefix stays off the title — the card renders the
+            // category as a chip right beside it, so folding it in again
+            // would print "PHYS 221" twice on one card.
+            task.title = item.title
             task.course = category
             task.dueDate = due
             task.canvasHash = item.contentHash
@@ -520,6 +648,20 @@ final class TaskStore: ObservableObject {
     /// Drag-and-drop between board columns. Dropping onto Completed marks the
     /// task done (running any repeat rollover); dragging a completed task
     /// somewhere else reopens it first.
+    /// Puts a card back exactly where something else found it — column and
+    /// the manual flag together.
+    ///
+    /// Separate from `move` because move is a *user* placing a card, which is
+    /// what its manual flag records. A focus session returning a task is not
+    /// the user placing it, and using move here would leave every task that
+    /// ever had a session run on it pinned out of automatic promotion.
+    /// Completed tasks are left alone: the card has moved on.
+    func restorePlacement(_ id: UUID, to column: TaskColumn, manual: Bool) {
+        guard let index = items.firstIndex(where: { $0.id == id }), !items[index].isCompleted else { return }
+        items[index].column = column
+        items[index].columnIsManual = manual
+    }
+
     func move(_ id: UUID, to column: TaskColumn) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         if column == .completed {
@@ -542,6 +684,7 @@ final class TaskStore: ObservableObject {
         task.column = .completed
         task.columnIsManual = true
         items[index] = task
+        lastCompletedTaskID = task.id
 
         // Every occurrence is a real task, so completing one just completes
         // it. What keeps a perpetual series from running dry is extending the
@@ -707,5 +850,16 @@ final class TaskStore: ObservableObject {
 
     func completedCount(since startDate: Date) -> Int {
         items.filter { $0.isCompleted && ($0.completedAt ?? .distantPast) >= startDate }.count
+    }
+
+    /// Tasks ticked off on one particular day — what the stats page compares
+    /// today against yesterday with.
+    func completedCount(on day: Date, calendar: Calendar = .current) -> Int {
+        let start = calendar.startOfDay(for: day)
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return 0 }
+        return items.filter {
+            guard $0.isCompleted, let done = $0.completedAt else { return false }
+            return done >= start && done < end
+        }.count
     }
 }

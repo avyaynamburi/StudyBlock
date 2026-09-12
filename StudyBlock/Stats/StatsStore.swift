@@ -25,20 +25,16 @@ final class StatsStore: ObservableObject {
                                    course: course, taskTitle: taskTitle))
     }
 
-    /// Focused minutes per course since `startDate`, most-studied first.
-    /// Sessions without a task/course land in "General".
-    func minutesByCourse(since startDate: Date) -> [(course: String, minutes: Double)] {
-        let recent = records.filter { $0.date >= startDate }
-        guard !recent.isEmpty else { return [] }
-        let buckets = Dictionary(grouping: recent) { $0.course ?? "General" }
-        return buckets
-            .map { (course: $0.key, minutes: $0.value.reduce(0) { $0 + $1.minutes }) }
-            .sorted { $0.minutes > $1.minutes }
-    }
-
-    var minutesToday: Double {
-        let today = Calendar.current.startOfDay(for: .now)
-        return records.filter { $0.date >= today }.reduce(0) { $0 + $1.minutes }
+    /// Everything the stats page reads, in one value.
+    ///
+    /// Task counts come in from outside rather than being looked up here: the
+    /// focus log and the board are separate stores, and this one has no
+    /// business holding a reference to the other.
+    func summary(goalMinutes: Double, tasksToday: Int = 0, tasksYesterday: Int = 0,
+                 now: Date = Date()) -> StatsSummary {
+        StatsSummary(records: records, tasksCompletedToday: tasksToday,
+                     tasksCompletedYesterday: tasksYesterday,
+                     goalMinutes: goalMinutes, now: now)
     }
 
     var completedSessionCount: Int {
@@ -47,19 +43,6 @@ final class StatsStore: ObservableObject {
 
     var currentStreak: Int {
         Self.streak(recordDates: records.filter(\.completed).map(\.date))
-    }
-
-    /// Focused minutes per day for the last `days` days, oldest first,
-    /// including zero days so charts show gaps honestly.
-    func dailyMinutes(days: Int) -> [(day: Date, minutes: Double)] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        return (0..<days).reversed().compactMap { offset in
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: today),
-                  let next = calendar.date(byAdding: .day, value: 1, to: day) else { return nil }
-            let total = records.filter { $0.date >= day && $0.date < next }.reduce(0) { $0 + $1.minutes }
-            return (day, total)
-        }
     }
 
     /// Consecutive days with at least one completed session, counting back

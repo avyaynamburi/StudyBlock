@@ -43,6 +43,9 @@ build canvas       $CANVAS_SRC Tests/CanvasTests.swift          && run canvas
 build credentials  StudyBlock/Canvas/CanvasFeed.swift Tests/CanvasCredentialTests.swift && run credentials
 build canvasmerge  ${APP_SRC} Tests/CanvasMergeTests.swift      && run canvasmerge canvas-merge-sandbox
 build taskmerge    ${APP_SRC} Tests/TaskMergeTests.swift        && run taskmerge mp-sandbox
+build stats        ${APP_SRC} Tests/StatsTests.swift            && run stats stats-sandbox
+build focus        ${APP_SRC} Tests/FocusSessionTests.swift     && run focus focus-sandbox
+build board        ${APP_SRC} Tests/BoardTests.swift            && run board board-sandbox
 
 if [ "$FAILED" -eq 0 ]; then echo "all suites passed"; else echo "SOME SUITES FAILED"; fi
 exit $FAILED

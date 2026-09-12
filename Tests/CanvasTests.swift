@@ -158,11 +158,11 @@ struct CanvasTests {
         // Swift's built-in Hasher is seeded per process and would differ here.
         print("  hash(Problem Set 5) = \(a.contentHash)")
 
-        print("\nqualified title")
-        equal(problemSet?.qualifiedTitle, "PHYS 221: Problem Set 5",
-              "course is folded into the title for a board with one Canvas category")
-        equal(readingDay?.qualifiedTitle, "Reading Day",
-              "an entry with no course keeps its bare title")
+        print("\ncourse")
+        equal(problemSet?.course, "PHYS 221",
+              "the bracketed course is kept as its own field, to tag the task with")
+        equal(problemSet?.title, "Problem Set 5", "and is off the title")
+        equal(readingDay?.course, nil, "an entry with no course has none to tag with")
 
         print("\n\(checks - failures)/\(checks) checks passed")
         exit(failures == 0 ? 0 : 1)

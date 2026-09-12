@@ -71,7 +71,32 @@ final class BlockerViewModel: ObservableObject {
         reapplyIfBlocking()
     }
 
+    /// How long "switch the block off" waits before the block actually comes
+    /// off, in seconds. Zero means no wait.
+    ///
+    /// The delay is the entire feature. The moment you most want the block
+    /// gone is the moment you should have the hardest time getting it, and
+    /// half a minute is usually longer than the urge lasts. Switching
+    /// protection *on* is never delayed.
+    @Published var unblockCooldownSeconds: Int {
+        didSet { UserDefaults.standard.set(unblockCooldownSeconds, forKey: Self.cooldownKey) }
+    }
+
+    /// Seconds left on a pending unblock, or nil when none is pending.
+    @Published private(set) var unblockCountdown: Int?
+
+    /// The cooldowns on offer. Anything past five minutes stops being a
+    /// cooling-off period and becomes a second kind of lock.
+    static let cooldownChoices = [0, 10, 30, 60, 120, 300]
+    private static let cooldownKey = "unblockCooldownSeconds"
+    private var cooldownTimer: Timer?
+
+    var isCoolingDown: Bool { unblockCountdown != nil }
+
     init() {
+        // `integer(forKey:)` can't tell "never set" from a deliberate zero,
+        // and zero is a real setting here — it means no cooldown at all.
+        unblockCooldownSeconds = (UserDefaults.standard.object(forKey: Self.cooldownKey) as? Int) ?? 30
         loadGroups()
         refresh()
         // Keep status truthful even if hosts or Login Items change outside the
@@ -205,12 +230,78 @@ final class BlockerViewModel: ObservableObject {
         }
     }
 
+    /// The switch the user actually flips. Turning the block on happens at
+    /// once; turning it off goes through the cooldown.
+    ///
+    /// Automation — a schedule window closing, a focus session ending —
+    /// deliberately calls `stopBlocking` instead: those already happen at a
+    /// moment the user chose in advance, and making them wait would just
+    /// leave the block on for half a minute after its own reason for
+    /// existing had passed.
     func toggleBlocking() async {
-        if isBlocking {
-            await stopBlocking()
-        } else {
+        guard isBlocking else {
+            cancelUnblock()
             await startBlocking()
+            return
         }
+        requestUnblock()
+    }
+
+    /// Begins the wait before the block comes off — or lifts it immediately
+    /// when the cooldown is switched off.
+    ///
+    /// A second request while one is already pending is ignored rather than
+    /// restarting the clock: the countdown is a pause for thought, not a
+    /// penalty for looking at it twice.
+    func requestUnblock() {
+        guard isBlocking else { return }
+        guard unblockCooldownSeconds > 0 else {
+            Task { await stopBlocking() }
+            return
+        }
+        guard unblockCountdown == nil else { return }
+        unblockCountdown = unblockCooldownSeconds
+        cooldownTimer?.invalidate()
+        cooldownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.tickCooldown() }
+        }
+    }
+
+    /// Called it off — the block stays exactly where it is.
+    func cancelUnblock() {
+        cooldownTimer?.invalidate()
+        cooldownTimer = nil
+        unblockCountdown = nil
+    }
+
+    private func tickCooldown() {
+        guard let remaining = unblockCountdown else { return }
+        // Something else already lifted the block (a session ended, a
+        // schedule window closed). There is nothing left to count down to.
+        guard isBlocking else {
+            cancelUnblock()
+            return
+        }
+        guard remaining > 1 else {
+            cancelUnblock()
+            Task { await stopBlocking() }
+            return
+        }
+        unblockCountdown = remaining - 1
+    }
+
+    /// "30s", "2m" — how a cooldown is written wherever it is offered.
+    static func cooldownLabel(_ seconds: Int) -> String {
+        guard seconds > 0 else { return "Off" }
+        guard seconds >= 60 else { return "\(seconds)s" }
+        return "\(seconds / 60)m"
+    }
+
+    /// The pending unblock as a clock: "0:27".
+    var unblockCountdownLabel: String {
+        guard let remaining = unblockCountdown else { return "" }
+        return String(format: "%d:%02d", remaining / 60, remaining % 60)
     }
 
     /// Direct entry points so the focus timer can drive blocking without

@@ -48,6 +48,35 @@ enum Theme {
     /// still reads as a distinct colour without breaking the matte surface.
     static let categoryHueSteps: [Double] = stride(from: 0, to: 360, by: 30).map { $0 }
 
+    /// The `index`-th hue to hand a category that hasn't got one, walking the
+    /// colour wheel so that categories created one after another come out as
+    /// far apart as the wheel allows.
+    ///
+    /// The first twelve are exactly `categoryHueSteps`, in the order
+    /// 0°, 150°, 300°, 90°, … — a 150° stride. Five steps at a time has one
+    /// property worth the arithmetic: 150 and 360 share a factor of 30, so
+    /// the walk lands on all twelve stops before it revisits any of them,
+    /// while no two consecutive categories are neighbours on the wheel. A
+    /// plain +30° walk would hand the first three courses three shades of
+    /// red, which is the failure this exists to avoid.
+    ///
+    /// Past twelve it starts again, offset half a step (15°), then a quarter
+    /// (7.5°), each round bisecting the gaps left by the last. Colours get
+    /// closer together the further out you go — unavoidable on a wheel with
+    /// no room left — but they never repeat, and a board would need a
+    /// forty-ninth category before two were genuinely hard to tell apart.
+    static func categoryHue(index: Int) -> Double {
+        let n = max(0, index)
+        let stops = categoryHueSteps.count
+        let round = n / stops
+        // Exactly representable in binary (30, 15, 7.5, 3.75 …), so a hue
+        // handed out here compares equal to itself after a save and reload,
+        // and `==` against the picker's stops is safe.
+        let offset = round == 0 ? 0 : 30 / pow(2, Double(round))
+        let base = Double(n % stops) * 150
+        return (base + offset).truncatingRemainder(dividingBy: 360)
+    }
+
     /// The swatch shown in the category color picker itself — desaturated to
     /// sit against grey rather than glow off it.
     static func categoryPastel(hue: Double) -> Color {

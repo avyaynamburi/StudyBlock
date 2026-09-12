@@ -41,7 +41,7 @@ struct CanvasSheet: View {
                     Text("In Canvas, open **Calendar** and click **Calendar Feed** at the "
                          + "bottom of the right-hand sidebar. Copy the link it shows you and "
                          + "paste it below \u{2014} assignments with due dates will appear on "
-                         + "your board in the \u{201C}\(TaskStore.canvasCategory)\u{201D} category.")
+                         + "your board, each tagged with its own course.")
                         .font(Theme.ui(12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

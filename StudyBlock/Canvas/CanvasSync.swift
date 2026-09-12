@@ -98,8 +98,11 @@ final class CanvasSync: ObservableObject {
             }
 
             let items = CanvasNormalizer.recentOrUpcoming(CanvasNormalizer.normalize(events))
+            // No colour bookkeeping here: the store gives every category that
+            // reaches the board its own hue, and a course imported from
+            // Canvas is coloured by exactly the rule that colours one you
+            // typed yourself.
             let summary = store.mergeCanvas(items, includeEvents: importsEvents)
-            registerCategoryColors(in: store)
 
             lastSummary = summary
             lastSyncedAt = Date()
@@ -113,18 +116,6 @@ final class CanvasSync: ObservableObject {
             // and rendering it risks printing the URL.
             lastError = .transport
             return .failure(.transport)
-        }
-    }
-
-    /// Gives the Canvas categories a fixed hue the first time they appear, so
-    /// they read as one group instead of taking whatever the name happens to
-    /// hash to. A hue the user has since changed is left alone.
-    private func registerCategoryColors(in store: TaskStore) {
-        if store.courseHues[TaskStore.canvasCategory] == nil {
-            store.setHue(28, for: TaskStore.canvasCategory)
-        }
-        if importsEvents, store.courseHues[TaskStore.canvasEventCategory] == nil {
-            store.setHue(268, for: TaskStore.canvasEventCategory)
         }
     }
 }

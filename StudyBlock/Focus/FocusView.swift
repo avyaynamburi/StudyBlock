@@ -6,6 +6,7 @@ struct FocusView: View {
     @EnvironmentObject private var timer: FocusTimerController
     @EnvironmentObject private var appBlocker: AppBlockerController
     @EnvironmentObject private var tabCloser: BrowserTabCloser
+    @EnvironmentObject private var tasks: TaskStore
     @AppStorage("lockSessions") private var lockSessions = false
     /// Typed rather than stepped. Held as text so a half-finished entry is
     /// the user's business, not something to be rounded into a number.
@@ -20,8 +21,22 @@ struct FocusView: View {
     @State private var deletingGroup: BlockGroup?
     @State private var showingAppPicker = false
     @State private var showingUnlockChallenge = false
+    @State private var showingTaskPrompt = false
 
     var body: some View {
+        page
+            // On the page, not the idle card: starting the session takes that
+            // card off screen, and a sheet presented from a view that is
+            // being removed is a sheet that can get stuck.
+            .sheet(isPresented: $showingTaskPrompt) {
+                SessionTaskSheet(tasks: tasks.items,
+                                 courseColor: { tasks.color(for: $0) },
+                                 onStart: { beginSession(on: $0) },
+                                 onCreate: { tasks.addWorkingOn(title: $0) })
+            }
+    }
+
+    private var page: some View {
         VStack(spacing: 0) {
             PageHeader("Focus", subtitle: model.isBlocking
                        ? "Blocking \(model.domains.count) website\(model.domains.count == 1 ? "" : "s")"
@@ -253,6 +268,7 @@ struct FocusView: View {
                 .disabled(focusMode == .timer && typedMinutes == nil)
             }
 
+
             // A lock is the helper being told when to let go, so there is
             // nothing to offer a session with no end.
             if focusMode == .timer {
@@ -326,13 +342,23 @@ struct FocusView: View {
             .strokeBorder(typedMinutes == nil ? Theme.danger : Theme.stroke, lineWidth: 1))
     }
 
+    /// Start always goes through the question first. A session that knows
+    /// what it is for is the one that can credit the right subject and ask
+    /// the right thing when it ends; one started blind can do neither, and
+    /// the sheet's "Just Focus" is there for when that is genuinely the
+    /// answer.
     private func startSession() {
+        guard focusMode == .stopwatch || typedMinutes != nil else { return }
+        showingTaskPrompt = true
+    }
+
+    private func beginSession(on task: TodoItem?) {
         switch focusMode {
         case .stopwatch:
-            timer.startStopwatch()
+            timer.startStopwatch(task: task)
         case .timer:
             guard let typedMinutes else { return }
-            timer.start(minutes: typedMinutes, locked: lockSessions)
+            timer.start(minutes: typedMinutes, task: task, locked: lockSessions)
         }
     }
 
@@ -400,6 +426,59 @@ struct FocusView: View {
 
     // MARK: - Website shield
 
+    /// The pending unblock, while it is pending. Deliberately the loudest
+    /// thing on the card: it is the one moment the app is asking you to sit
+    /// still for half a minute.
+    private var cooldownBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "hourglass")
+                .font(Theme.ui(13, .semibold))
+                .foregroundStyle(Theme.amber)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Unblocking in \(model.unblockCountdownLabel)")
+                    .font(Theme.ui(12, .semibold))
+                    .monospacedDigit()
+                Text("Still time to change your mind.")
+                    .font(Theme.ui(10))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Keep Blocking") { model.cancelUnblock() }
+                .buttonStyle(SoftPillButtonStyle(tint: Theme.accent))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Theme.amberSoft, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+
+    private var cooldownSetting: some View {
+        HStack(spacing: 8) {
+            Text("Wait before unblocking")
+                .font(Theme.ui(10))
+                .foregroundStyle(.secondary)
+            Menu {
+                ForEach(BlockerViewModel.cooldownChoices, id: \.self) { seconds in
+                    Button {
+                        model.unblockCooldownSeconds = seconds
+                    } label: {
+                        if seconds == model.unblockCooldownSeconds {
+                            Label(BlockerViewModel.cooldownLabel(seconds), systemImage: "checkmark")
+                        } else {
+                            Text(BlockerViewModel.cooldownLabel(seconds))
+                        }
+                    }
+                }
+            } label: {
+                Text(BlockerViewModel.cooldownLabel(model.unblockCooldownSeconds))
+                    .font(Theme.ui(10, .medium))
+            }
+            .menuStyle(.button)
+            .buttonStyle(SoftPillButtonStyle())
+            .fixedSize()
+            Spacer()
+        }
+    }
+
     private var shieldCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             Toggle(isOn: Binding(
@@ -425,7 +504,13 @@ struct FocusView: View {
                 }
             }
             .toggleStyle(GlowToggleStyle())
-            .disabled(!model.canToggle || timer.isRunning)
+            .disabled(!model.canToggle || timer.isRunning || model.isCoolingDown)
+
+            if model.isCoolingDown {
+                cooldownBanner
+            } else {
+                cooldownSetting
+            }
 
             Divider().overlay(Theme.stroke)
 

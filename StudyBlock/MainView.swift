@@ -29,6 +29,10 @@ struct MainView: View {
     @EnvironmentObject private var stats: StatsStore
     @EnvironmentObject private var tasks: TaskStore
     @EnvironmentObject private var decks: DeckStore
+    @State private var confettiTrigger = 0
+    /// The running stopwatch's task, once that task has been ticked off — the
+    /// question in `StopwatchDoneSheet`, waiting to be asked.
+    @State private var stopwatchDone: StopwatchDonePrompt?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -37,6 +41,68 @@ struct MainView: View {
         }
         .frame(minWidth: 860, minHeight: 600)
         .background(Theme.bg)
+        // The window, not the Focus page: a session can be finished from the
+        // menu bar while any tab is open, and the question has to find you
+        // wherever you are.
+        .sheet(item: $timer.finishedPrompt) { prompt in
+            SessionFinishSheet(prompt: prompt) { finished in
+                answerFinishedSession(prompt, finished: finished)
+            }
+        }
+        .sheet(item: $stopwatchDone) { prompt in
+            StopwatchDoneSheet(taskTitle: prompt.taskTitle, elapsedLabel: timer.elapsedLabel) { stop in
+                if stop { timer.stopStopwatchForCompletedTask() }
+            }
+        }
+        .overlay { ScreenConfettiOverlay(trigger: confettiTrigger) }
+        // Every route to a completed task ends up here — the checkbox, a drag
+        // into Completed, an import — because the store reports the
+        // completion rather than each caller remembering to.
+        // A task is in Currently Doing for exactly as long as a session is
+        // running on it. Done here rather than at each of the four places a
+        // session can start, so no route can forget.
+        .onChange(of: timer.currentTaskID) { started in
+            guard let started,
+                  let task = tasks.items.first(where: { $0.id == started }),
+                  !task.isCompleted, task.column != .doing else { return }
+            tasks.move(started, to: .doing)
+        }
+        .onChange(of: timer.taskToRestore) { placement in
+            guard let placement else { return }
+            timer.taskToRestore = nil
+            restorePlacement(placement)
+        }
+        .onChange(of: tasks.lastCompletedTaskID) { completed in
+            guard let completed,
+                  timer.isRunning, timer.isStopwatch,
+                  timer.currentTaskID == completed else { return }
+            stopwatchDone = timer.currentTaskTitle.map(StopwatchDonePrompt.init)
+        }
+    }
+
+    /// Returns a finished session's task to the column it came from.
+    ///
+    /// A task the user completed *during* the session keeps its completion:
+    /// pulling a ticked card back out of Completed because a timer happened
+    /// to end would undo an answer they already gave — and it makes the
+    /// question below pointless, so that gets dropped too.
+    private func restorePlacement(_ placement: SessionTaskPlacement) {
+        let completed = tasks.items.first { $0.id == placement.taskID }?.isCompleted ?? false
+        guard !completed else {
+            timer.finishedPrompt = nil
+            return
+        }
+        tasks.restorePlacement(placement.taskID, to: placement.column, manual: placement.wasManual)
+    }
+
+    /// Applies the answer to "did you finish it?".
+    ///
+    /// Only "done" moves anything: by the time this is asked the task is
+    /// already back in the column the session took it from.
+    private func answerFinishedSession(_ prompt: FinishedSessionPrompt, finished: Bool) {
+        guard finished, tasks.items.contains(where: { $0.id == prompt.taskID }) else { return }
+        tasks.move(prompt.taskID, to: .completed)
+        confettiTrigger += 1
     }
 
     // MARK: - Sidebar

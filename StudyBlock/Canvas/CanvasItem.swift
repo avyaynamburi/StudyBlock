@@ -38,21 +38,20 @@ struct CanvasItem: Equatable {
     /// Whichever timestamp this kind carries.
     var when: ICSDate? { dueAt ?? startsAt }
 
-    /// The title as it should read on a board that has no course column of
-    /// its own: "PHYS 221: Problem Set 5".
-    var qualifiedTitle: String {
-        guard let course, !course.isEmpty else { return title }
-        return "\(course): \(title)"
-    }
-
     /// Identity plus content, hashed. Two syncs that produce the same hash
     /// for the same `sourceID` describe the same assignment, unchanged.
     ///
     /// The due date is *inside* the hash on purpose. A seen-set keyed on
     /// identity alone silently swallows a professor pushing a deadline back,
     /// which is the single most important update this feature can deliver.
+    ///
+    /// `shapeVersion` is inside it too, so that changing how an item is
+    /// written onto the board reaches assignments that are already there.
+    /// Without it the hash still matches, the merge reports "unchanged", and
+    /// a board imported under the old shape keeps it forever.
     var contentHash: String {
         let payload = [
+            CanvasItem.shapeVersion,
             kind.rawValue,
             title,
             course ?? "",
@@ -63,6 +62,12 @@ struct CanvasItem: Equatable {
         let digest = SHA256.hash(data: Data(payload.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Bumped whenever the *board* representation of an item changes rather
+    /// than the item itself — the tag it lands under, the text of its title.
+    /// One sync then rewrites every imported task once, and reports them as
+    /// updated, which is exactly what has happened to them.
+    private static let shapeVersion = "2"
 
     /// A date rendered for hashing only — fixed format, fixed zone, so the
     /// hash is stable across runs, machines, and locales. `Date`'s own
