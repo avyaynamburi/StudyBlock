@@ -43,7 +43,7 @@ struct TaskMergePlan: Equatable {
             secondary = a
         } else {
             // Neither is from Canvas, or both are: no rule prefers one, so
-            // the card that was dropped onto wins. Arbitrary, but stable —
+            // the card the merge was started from wins. Arbitrary, but stable —
             // the same pair always resolves the same way, and the sheet is
             // right there to change it.
             primary = a

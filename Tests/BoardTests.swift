@@ -109,6 +109,21 @@ struct BoardTests {
         equal(back?.isCompleted, true, "stays completed — the session doesn't undo that")
         equal(back?.column, .completed, "and stays in the Completed column")
 
+        print("\nwhich cards get the red strip")
+        func dueSoon(_ due: Date?, completed: Bool = false) -> Bool {
+            var task = TodoItem(title: "Essay", dueDate: due)
+            task.isCompleted = completed
+            return task.isDueSoon(now: now, calendar: calendar)
+        }
+        check(dueSoon(moment(day: 10, hour: 23)), "due two days out, late in the day")
+        check(dueSoon(moment(day: 10, hour: 0)), "due two days out, at midnight")
+        check(!dueSoon(moment(day: 11, hour: 0)), "not three days out, even at the first minute of the day")
+        check(!dueSoon(moment(day: 20)), "not a week and more out")
+        check(dueSoon(moment(day: 8, hour: 9)), "due earlier today")
+        check(dueSoon(moment(day: 5)), "overdue")
+        check(!dueSoon(nil), "never an undated task")
+        check(!dueSoon(moment(day: 8), completed: true), "never a finished one")
+
         print("\n\(checks - failures)/\(checks) checks passed")
         exit(failures == 0 ? 0 : 1)
     }

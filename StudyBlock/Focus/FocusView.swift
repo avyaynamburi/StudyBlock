@@ -22,6 +22,9 @@ struct FocusView: View {
     @State private var showingAppPicker = false
     @State private var showingUnlockChallenge = false
     @State private var showingTaskPrompt = false
+    /// Remembered between sessions: someone who needs five minutes to get to
+    /// their desk needs it every time.
+    @AppStorage("focusStartDelay") private var startDelay = 0
 
     var body: some View {
         page
@@ -97,6 +100,8 @@ struct FocusView: View {
         VStack(spacing: 18) {
             if timer.isRunning {
                 runningTimer
+            } else if timer.isPending {
+                pendingTimer
             } else {
                 idleTimer
             }
@@ -228,6 +233,53 @@ struct FocusView: View {
         }
     }
 
+    /// The waiting room: set up, not started. Deliberately shaped like the
+    /// running card so the page doesn't appear to change mode on you, with
+    /// the one thing that matters — how long you have — in the same place.
+    private var pendingTimer: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle().stroke(Theme.amberSoft, lineWidth: 10)
+                VStack(spacing: 2) {
+                    Text(timer.pendingLabel)
+                        .font(Theme.number(40))
+                        .monospacedDigit()
+                    Text("until it starts")
+                        .font(Theme.ui(10, .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 190, height: 190)
+
+            VStack(spacing: 4) {
+                Text(pendingHeadline)
+                    .font(Theme.ui(15, .semibold))
+                Text("Nothing is blocked yet — the block goes on when the session does.")
+                    .font(Theme.ui(11))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            HStack(spacing: 10) {
+                Button("Cancel") { timer.cancelPendingStart() }
+                    .buttonStyle(SoftPillButtonStyle(tint: Theme.danger))
+                Button {
+                    timer.startPendingNow()
+                } label: {
+                    Label("Start Now", systemImage: "play.fill")
+                }
+                .buttonStyle(ProminentPillButtonStyle(size: .large))
+            }
+        }
+    }
+
+    private var pendingHeadline: String {
+        guard let pending = timer.pendingStart else { return "Session ready" }
+        let what = pending.mode == .stopwatch ? "Stopwatch" : "\(pending.minutes)-minute session"
+        guard let title = pending.task?.title else { return "\(what) about to start" }
+        return "\(what) on \u{201C}\(title)\u{201D}"
+    }
+
     private var idleTimer: some View {
         VStack(spacing: 18) {
             VStack(spacing: 4) {
@@ -256,6 +308,8 @@ struct FocusView: View {
 
             HStack(spacing: 12) {
                 if focusMode == .timer { minutesField }
+
+                startDelayMenu
 
                 Button {
                     startSession()
@@ -289,6 +343,32 @@ struct FocusView: View {
                 }
             }
         }
+    }
+
+    /// How long to wait before the session actually begins.
+    private var startDelayMenu: some View {
+        Menu {
+            ForEach(FocusTimerController.startDelayChoices, id: \.self) { choice in
+                Button {
+                    startDelay = choice
+                } label: {
+                    if choice == startDelay {
+                        Label(FocusTimerController.delayLabel(choice), systemImage: "checkmark")
+                    } else {
+                        Text(FocusTimerController.delayLabel(choice))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "hourglass").font(Theme.ui(11, .semibold))
+                Text("Start in \(FocusTimerController.delayLabel(startDelay).lowercased())")
+                    .font(Theme.ui(11, .medium))
+            }
+        }
+        .menuStyle(.button)
+        .buttonStyle(SoftPillButtonStyle(tint: startDelay > 0 ? Theme.accent : nil))
+        .fixedSize()
     }
 
     private var focusMode: FocusMode {
@@ -355,10 +435,11 @@ struct FocusView: View {
     private func beginSession(on task: TodoItem?) {
         switch focusMode {
         case .stopwatch:
-            timer.startStopwatch(task: task)
+            timer.schedule(mode: .stopwatch, minutes: 0, task: task, delayMinutes: startDelay)
         case .timer:
             guard let typedMinutes else { return }
-            timer.start(minutes: typedMinutes, task: task, locked: lockSessions)
+            timer.schedule(mode: .timer, minutes: typedMinutes, task: task,
+                           locked: lockSessions, delayMinutes: startDelay)
         }
     }
 

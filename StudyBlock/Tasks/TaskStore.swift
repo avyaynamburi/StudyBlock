@@ -163,6 +163,15 @@ final class TaskStore: ObservableObject {
         courseHues = assigned
     }
 
+    /// Gives a category that lives off the board — an exam's — a colour of
+    /// its own. `assignMissingHues` only sees categories on tasks, so without
+    /// this such a category falls back to a hashed hue that may already
+    /// belong to another subject.
+    func claimHue(for course: String) {
+        guard courseHues[course] == nil else { return }
+        courseHues[course] = nextCategoryHue
+    }
+
     /// The colour a category created right now would get — what the new
     /// category sheet opens on, so a hand-made category is as distinct from
     /// the rest as an imported one.

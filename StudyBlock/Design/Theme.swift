@@ -40,6 +40,11 @@ enum Theme {
     static let amberSoft = Color(light: 0x87652C, dark: 0xC2A165, lightAlpha: 0.13, darkAlpha: 0.14)
     static let danger = Color(light: 0x9C4B4B, dark: 0xC08585)
     static let dangerSoft = Color(light: 0x9C4B4B, dark: 0xC08585, lightAlpha: 0.12, darkAlpha: 0.15)
+    /// The strips down a task card's left edge for the two states that
+    /// outrank its category: due within two days (or overdue), and done.
+    /// Each is the same colour in both appearances.
+    static let dueSoonStrip = Color(light: 0xB94A48, dark: 0xB94A48)
+    static let completedStrip = Color(light: 0x6B8F71, dark: 0x6B8F71)
     /// Kept for the confetti mix, muted to match the rest.
     static let violet = Color(light: 0x5E5470, dark: 0xA79CB8)
 
@@ -103,26 +108,6 @@ enum Theme {
             // being readable.
             return NSColor(hue: hue / 360, saturation: isDark ? 0.28 : 0.38,
                            brightness: isDark ? 0.70 : 0.43, alpha: 1)
-        })
-    }
-
-    /// The border on a task that is coming due: `t` of 0 is a week or more
-    /// out, 1 is due now or already overdue.
-    ///
-    /// One hue the whole way — red — with only its strength moving, and not
-    /// by much. A deadline you notice when you look for it, rather than a
-    /// traffic light sitting on the board. This replaced a yellow → orange →
-    /// red sweep at saturation 0.82 and brightness 0.92, which was both the
-    /// last gradient in the app and the only thing on a task that glowed.
-    static func urgency(_ t: Double) -> Color {
-        let amount = min(1, max(0, t))
-        return Color(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            // Ends near `danger` so an overdue card and a danger control are
-            // recognisably the same red.
-            let saturation = isDark ? 0.20 + 0.14 * amount : 0.26 + 0.26 * amount
-            let brightness = isDark ? 0.50 + 0.24 * amount : 0.72 - 0.11 * amount
-            return NSColor(hue: 0, saturation: saturation, brightness: brightness, alpha: 1)
         })
     }
 

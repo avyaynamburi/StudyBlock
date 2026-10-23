@@ -7,6 +7,7 @@ A native macOS study companion:
   - **App blocking**: blocked apps (games, Discord, …) are quit automatically while blocking is on (enforced by the app process, so StudyBlock must be running).
   - **Focus on a task**: a ▶ button on any task starts a session linked to it; focused time accrues to its course.
 - **Tasks** — assignment tracker with natural-language quick-add (`essay friday #history !!`), due-date grouping (Overdue/Today/This Week), priorities, and daily/weekly repeats
+- **Events** — a month calendar of exam days (dates, no times) with a "coming up" countdown list; add one by typing (`chem final oct 14 #chem`), or click a day and type just the name
 - **Flashcards** — SM-2 spaced repetition (Again/Hard/Good/Easy with interval previews, due-card badges) plus a no-schedule practice mode
 - **Notes** — quick autosaving scratchpads
 - **Stats** — focused minutes, day streak, tasks completed, 7-day chart, focus-by-course chart

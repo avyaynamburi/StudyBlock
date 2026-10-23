@@ -259,6 +259,19 @@ struct TodoItem: Identifiable, Codable, Equatable {
         return Calendar.current.startOfDay(for: due) < Calendar.current.startOfDay(for: .now)
     }
 
+    /// Whether the card gets the red strip: unfinished, and due within
+    /// `dueSoonDays` or already overdue. Counted in calendar days, so a task
+    /// due at 9am on Friday turns red when Wednesday starts, not at 9am.
+    func isDueSoon(now: Date = .now, calendar: Calendar = .current) -> Bool {
+        guard !isCompleted, let due = dueDate,
+              let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now),
+                                                 to: calendar.startOfDay(for: due)).day
+        else { return false }
+        return days <= Self.dueSoonDays
+    }
+
+    static let dueSoonDays = 2
+
     /// True for a task that is one occurrence of a recurring series.
     var isRecurring: Bool { seriesID != nil && repeatRule != .none }
 

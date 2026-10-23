@@ -7,6 +7,7 @@ struct TasksView: View {
     @EnvironmentObject private var timer: FocusTimerController
     @EnvironmentObject private var canvas: CanvasSync
     @AppStorage("lockSessions") private var lockSessions = false
+    @AppStorage(CardStripStyle.storageKey) private var stripStyle = CardStripStyle.defaultStyle
 
     @State private var quickAddText = ""
     @State private var quickAddCourse: String?
@@ -17,8 +18,8 @@ struct TasksView: View {
     @State private var csvMessage: CSVMessage?
     @State private var showingCSVSheet = false
     @State private var showingCanvasSheet = false
-    @State private var merging: MergeTarget?
-    @State private var mergeRefusal: String?
+    /// The card "Merge With…" was chosen on, while its picker is open.
+    @State private var merging: TodoItem?
     @FocusState private var quickAddFocused: Bool
 
     /// Result of an import/export, shown in an alert afterwards.
@@ -26,14 +27,6 @@ struct TasksView: View {
         let id = UUID()
         let title: String
         let detail: String
-    }
-
-    /// A merge in progress. `partner` is set when one card was dropped onto
-    /// another; nil when the context menu opened the picker instead.
-    private struct MergeTarget: Identifiable {
-        let id = UUID()
-        let primary: TodoItem
-        var partner: TodoItem?
     }
 
     /// What the task editor is open on — an existing card, or a blank draft
@@ -68,19 +61,11 @@ struct TasksView: View {
         // One pull per launch. `CanvasSync` holds the guard rather than this
         // view, because `.task` re-runs every time the Tasks tab is selected.
         .task { await canvas.syncOnLaunch(into: store) }
-        .sheet(item: $merging) { target in
-            TaskMergeSheet(primary: target.primary, partner: target.partner,
-                           candidates: store.items,
+        .sheet(item: $merging) { task in
+            TaskMergeSheet(primary: task, candidates: store.items,
                            courseColor: { store.color(for: $0) }) { plan in
                 store.applyMerge(plan)
             }
-        }
-        .alert("Can\u{2019}t merge these", isPresented: Binding(
-            get: { mergeRefusal != nil }, set: { if !$0 { mergeRefusal = nil } })
-        ) {
-            Button("OK") { mergeRefusal = nil }
-        } message: {
-            Text(mergeRefusal ?? "")
         }
         .sheet(isPresented: $showingCanvasSheet) {
             CanvasSheet(canvas: canvas, canvasTaskCount: store.canvasCount) { runCanvasSync() }
@@ -197,8 +182,7 @@ struct TasksView: View {
                                 onDrop: { id in handleDrop(id: id, column: column) },
                                 onReorder: { id, targetID in handleReorder(id: id, before: targetID) },
                                 onMove: { id, target in handleDrop(id: id, column: target) },
-                                onMergeDrop: { id, targetID in beginMerge(id: id, into: targetID) },
-                                onMergePick: { task in beginMerge(from: task) })
+                                onMergePick: { task in merging = task })
                         .frame(width: 250)
                         .padding(.horizontal, 12)
                 }
@@ -281,26 +265,6 @@ struct TasksView: View {
                 title: "Created \(created) task\(created == 1 ? "" : "s")",
                 detail: "Each one is its own task you can complete, edit, or drag independently.")
         }
-    }
-
-    // MARK: - Merging
-
-    /// A card was option-dropped onto another. The sheet always opens — a
-    /// merge is never applied straight from the gesture.
-    private func beginMerge(id: UUID, into targetID: UUID) {
-        guard let dropped = store.items.first(where: { $0.id == id }),
-              let target = store.items.first(where: { $0.id == targetID }) else { return }
-        if let refusal = TaskMergePlan.refusal(target, dropped) {
-            mergeRefusal = refusal
-            return
-        }
-        merging = MergeTarget(primary: target, partner: dropped)
-    }
-
-    /// The context-menu route: the same sheet, opened on its picker because
-    /// there is no second card yet.
-    private func beginMerge(from task: TodoItem) {
-        merging = MergeTarget(primary: task, partner: nil)
     }
 
     private func handleToggle(_ task: TodoItem) {
@@ -498,6 +462,12 @@ struct TasksView: View {
                 Divider()
                 ForEach(store.courses, id: \.self) { course in
                     Button(course) { courseFilter = course }
+                }
+            }
+            Divider()
+            Picker("Card Strips", selection: $stripStyle) {
+                ForEach(CardStripStyle.allCases, id: \.self) { style in
+                    Text(style.label).tag(style)
                 }
             }
         } label: {
@@ -827,7 +797,6 @@ private struct BoardColumn: View {
     let onDrop: (UUID) -> Void
     let onReorder: (_ id: UUID, _ targetID: UUID) -> Void
     let onMove: (_ id: UUID, _ target: TaskColumn) -> Void
-    let onMergeDrop: (_ id: UUID, _ targetID: UUID) -> Void
     let onMergePick: (TodoItem) -> Void
 
     @State private var isTargeted = false
@@ -835,9 +804,6 @@ private struct BoardColumn: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 7) {
-                Image(systemName: column.icon)
-                    .font(Theme.ui(11, .semibold))
-                    .foregroundStyle(Theme.accent)
                 Text(column.rawValue)
                     .font(Theme.ui(12, .semibold))
                     .textCase(.uppercase)
@@ -846,8 +812,8 @@ private struct BoardColumn: View {
                 Text("\(count)")
                     .font(Theme.ui(10, .semibold))
                     .foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 4)
             Divider().overlay(Theme.stroke)
 
@@ -903,7 +869,6 @@ private struct BoardColumn: View {
                  onReorder: { droppedID in onReorder(droppedID, task.id) },
                  onSelect: { onSelect(task) },
                  onMove: { target in onMove(task.id, target) },
-                 onMergeDrop: { droppedID in onMergeDrop(droppedID, task.id) },
                  onMergePick: { onMergePick(task) })
     }
 
@@ -939,6 +904,24 @@ private struct BoardColumn: View {
 
 // MARK: - Task card
 
+/// What colours the strip down a task card's left edge. A setting rather than
+/// a code change, so the two looks can be compared on a real board and the
+/// one that loses is a menu click away rather than a rebuild.
+enum CardStripStyle: String, CaseIterable {
+    case category
+    case blue
+
+    static let storageKey = "cardStripStyle"
+    static let defaultStyle = CardStripStyle.blue
+
+    var label: String {
+        switch self {
+        case .category: return "Category Colours"
+        case .blue: return "Blue"
+        }
+    }
+}
+
 struct TaskCard: View {
     let task: TodoItem
     let column: TaskColumn
@@ -949,19 +932,12 @@ struct TaskCard: View {
     var onReorder: ((UUID) -> Void)?
     var onSelect: (() -> Void)?
     var onMove: ((TaskColumn) -> Void)?
-    /// A card was dropped here with Option held: fold the two together
-    /// instead of repositioning.
-    var onMergeDrop: ((UUID) -> Void)?
-    /// "Merge with" from the context menu, which opens the picker instead of
-    /// needing a drag at all.
+    /// "Merge With…" from the context menu, which opens the picker.
     var onMergePick: (() -> Void)?
 
+    @AppStorage(CardStripStyle.storageKey) private var stripStyle = CardStripStyle.defaultStyle
     @State private var hovering = false
-    /// A card is hovering over this one's body: dropping folds the two into
-    /// one.
-    @State private var mergeTargeted = false
-    /// A card is hovering over the thin strip along the top edge: dropping
-    /// puts it in front of this one instead.
+    /// Another card is hovering over this one: dropping puts it in front.
     @State private var reorderTargeted = false
 
     var body: some View {
@@ -1050,7 +1026,7 @@ struct TaskCard: View {
                         .help(task.repeatRule.intervalLabel(task.repeatInterval))
                 }
                 if let course = task.course {
-                    TagChip(text: course, color: courseColor(course))
+                    TagChip(text: course, color: .secondary)
                 }
                 if let due = task.dueDate {
                     Text(Self.dueLabel(for: due))
@@ -1064,7 +1040,7 @@ struct TaskCard: View {
             .onTapGesture { onSelect?() }
         }
         .padding(10)
-        .background(cardBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .background { cardFill(cardBackground) }
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .strokeBorder(borderColor, lineWidth: borderWidth))
         // Pick the card up from anywhere on it. This used to hang off the two
@@ -1086,21 +1062,6 @@ struct TaskCard: View {
                     .padding(.horizontal, 4)
                     .offset(y: -6)
             }
-        }
-        // Dropping onto the card itself merges, so reordering keeps a strip
-        // of its own along the top edge — the place you already aim for when
-        // putting one card in front of another. It sits above the card's own
-        // drop area, so it wins inside its own band.
-        .overlay(alignment: .top) {
-            Color.clear
-                .frame(height: 13)
-                .contentShape(Rectangle())
-                .dropDestination(for: String.self) { droppedItems, _ in
-                    guard let onReorder, let idString = droppedItems.first,
-                          let id = UUID(uuidString: idString) else { return false }
-                    onReorder(id)
-                    return true
-                } isTargeted: { reorderTargeted = $0 }
         }
         .contextMenu {
             Button("Edit Task\u{2026}") { onSelect?() }
@@ -1126,14 +1087,13 @@ struct TaskCard: View {
         }
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)
-        .animation(.easeOut(duration: 0.1), value: mergeTargeted)
         .animation(.easeOut(duration: 0.1), value: reorderTargeted)
         .dropDestination(for: String.self) { droppedItems, _ in
-            guard let onMergeDrop, let idString = droppedItems.first,
+            guard let onReorder, let idString = droppedItems.first,
                   let id = UUID(uuidString: idString) else { return false }
-            onMergeDrop(id)
+            onReorder(id)
             return true
-        } isTargeted: { mergeTargeted = $0 }
+        } isTargeted: { reorderTargeted = $0 }
     }
 
     /// What you actually pick up. `.draggable` rasterises the view it's
@@ -1164,7 +1124,7 @@ struct TaskCard: View {
                         .foregroundStyle(.tertiary)
                 }
                 if let course = task.course {
-                    TagChip(text: course, color: courseColor(course))
+                    TagChip(text: course, color: .secondary)
                 }
                 if let due = task.dueDate {
                     Text(Self.dueLabel(for: due))
@@ -1177,7 +1137,7 @@ struct TaskCard: View {
         }
         .padding(10)
         .frame(width: 226, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .background { cardFill(AnyShapeStyle(Theme.surface)) }
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .strokeBorder(Theme.accent.opacity(0.65), lineWidth: 1.5))
         .shadow(color: .black.opacity(0.22), radius: 10, y: 5)
@@ -1185,36 +1145,40 @@ struct TaskCard: View {
         .padding(16)
     }
 
+    /// The card's fill, with a strip down the left edge.
+    private func cardFill(_ fill: AnyShapeStyle) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        return ZStack(alignment: .leading) {
+            shape.fill(fill)
+            Rectangle()
+                .fill(stripColor)
+                .frame(width: 4)
+        }
+        .clipShape(shape)
+    }
+
+    /// Every card has a strip. A finished task, or one coming due, takes that
+    /// state's colour whatever its category. Otherwise it's blue, or the
+    /// category's colour when that style is picked — and blue again for a
+    /// task with no category, rather than no strip at all. The chip stays
+    /// grey either way, so a column of cards doesn't read as a colour chart.
+    private var stripColor: Color {
+        if task.isCompleted { return Theme.completedStrip }
+        if task.isDueSoon() { return Theme.dueSoonStrip }
+        if stripStyle == .category, let course = task.course { return courseColor(course) }
+        return Theme.accentFill
+    }
+
     private var cardBackground: AnyShapeStyle {
-        // Filled in while a card hovers over this one, so "drop here to
-        // merge" reads differently from "drop here to reorder".
-        if mergeTargeted { return AnyShapeStyle(Theme.accentSoft) }
-        if column == .completed { return AnyShapeStyle(Theme.successSoft) }
-        return AnyShapeStyle(hovering ? Theme.surface : Theme.surface.opacity(0.7))
+        AnyShapeStyle(hovering ? Theme.surface : Theme.surface.opacity(0.7))
     }
 
     private var borderColor: Color {
-        if mergeTargeted { return Theme.accent }
-        if reorderTargeted { return Theme.accent }
-        if column == .completed { return Theme.success }
-        if column == .upcoming, !task.isCompleted, let due = task.dueDate {
-            return Self.urgencyColor(for: due)
-        }
-        return Theme.stroke
+        reorderTargeted ? Theme.accent : Theme.stroke
     }
 
     private var borderWidth: CGFloat {
-        if mergeTargeted || reorderTargeted || column == .completed { return 2 }
-        if column == .upcoming, !task.isCompleted, task.dueDate != nil { return 1.5 }
-        return 1
-    }
-
-    /// How close this card is to its deadline, as the faint red border
-    /// `Theme.urgency` draws: barely there a week out, firmest once the day
-    /// arrives.
-    private static func urgencyColor(for dueDate: Date, now: Date = Date()) -> Color {
-        let daysRemaining = dueDate.timeIntervalSince(now) / 86400
-        return Theme.urgency(1 - daysRemaining / 7)
+        reorderTargeted ? 2 : 1
     }
 
     static func dueLabel(for date: Date) -> String {
@@ -1240,7 +1204,7 @@ struct TaskCard: View {
 
 // MARK: - Category picker
 
-private struct CategoryPickerButton: View {
+struct CategoryPickerButton: View {
     @Binding var selection: String?
     let courses: [String]
     var courseColor: (String) -> Color = { _ in Theme.accent }

@@ -109,6 +109,14 @@ struct FocusSessionTests {
         equal(store.lastCompletedTaskID, other.id,
               "reopening reports nothing — there is no new completion to react to")
 
+        print("\nhow a delayed start is written")
+        equal(FocusTimerController.delayLabel(0), "Now", "no delay says so in words")
+        equal(FocusTimerController.delayLabel(5), "5 min", "and a delay says how long")
+        check(FocusTimerController.startDelayChoices.first == 0,
+              "starting now is the first choice, so it stays the default")
+        check(FocusTimerController.startDelayChoices.allSatisfy { $0 <= 30 },
+              "nothing on offer is long enough to be a reminder rather than a run-up")
+
         print("\nhow a cooldown is written")
         equal(BlockerViewModel.cooldownLabel(0), "Off", "no cooldown says so in words")
         equal(BlockerViewModel.cooldownLabel(30), "30s", "seconds under a minute")

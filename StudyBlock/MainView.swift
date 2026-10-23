@@ -4,6 +4,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case focus = "Focus"
     case schedule = "Schedule"
     case tasks = "Tasks"
+    case events = "Events"
     case flashcards = "Flashcards"
     case notes = "Notes"
     case stats = "Stats"
@@ -15,6 +16,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .focus: return "timer"
         case .schedule: return "calendar"
         case .tasks: return "checklist"
+        case .events: return "graduationcap"
         case .flashcards: return "rectangle.on.rectangle.angled"
         case .notes: return "note.text"
         case .stats: return "chart.bar"
@@ -177,35 +179,57 @@ struct MainView: View {
         }
     }
 
+    /// The session, wherever you are in the app.
+    ///
+    /// Tapping it goes to the Focus page, and the one button does whatever
+    /// the session most needs next — so a stopwatch you started an hour ago
+    /// can be stopped from the Notes tab without hunting for it.
     @ViewBuilder
     private var sidebarFooter: some View {
-        if timer.isRunning {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .stroke(Theme.accentSoft, lineWidth: 3.5)
-                    Circle()
-                        .trim(from: 0, to: timer.ringProgress)
-                        .stroke(Theme.accentFill, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                    Image(systemName: timer.isLockedSession ? "lock.fill"
-                          : (timer.isStopwatch ? "stopwatch" : "timer"))
-                        .font(Theme.ui(10, .semibold))
-                        .foregroundStyle(Theme.accent)
-                }
-                .frame(width: 30, height: 30)
-                .animation(.linear(duration: 1), value: timer.ringProgress)
+        if timer.isRunning || timer.isPending {
+            VStack(spacing: 8) {
+                Button {
+                    section = .focus
+                } label: {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .stroke(dockTint.opacity(0.22), lineWidth: 3.5)
+                            if timer.isRunning {
+                                Circle()
+                                    .trim(from: 0, to: timer.ringProgress)
+                                    .stroke(dockTint, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+                                    .rotationEffect(.degrees(-90))
+                            }
+                            Image(systemName: dockIcon)
+                                .font(Theme.ui(10, .semibold))
+                                .foregroundStyle(dockTint)
+                        }
+                        .frame(width: 30, height: 30)
+                        .animation(.linear(duration: 1), value: timer.ringProgress)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(timer.displayLabel)
-                        .font(Theme.number(15, weight: .semibold))
-                        .monospacedDigit()
-                    Text(timer.currentTaskTitle ?? "Focus session")
-                        .font(Theme.ui(10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(timer.isPending ? timer.pendingLabel : timer.displayLabel)
+                                .font(Theme.number(15, weight: .semibold))
+                                .monospacedDigit()
+                            Text(dockCaption)
+                                .font(Theme.ui(10))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
                 }
-                Spacer(minLength: 0)
+                .buttonStyle(.plain)
+                .help("Go to the focus session")
+
+                if let action = dockAction {
+                    Button(action: action.run) {
+                        Text(action.title).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftPillButtonStyle(tint: action.tint))
+                }
             }
             .padding(11)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -223,6 +247,45 @@ struct MainView: View {
         }
     }
 
+    /// Amber while a session is only pending or has run out; the accent
+    /// while it is actually running. The colour is the state, at a glance,
+    /// from any tab.
+    private var dockTint: Color {
+        if timer.isPending || timer.isAwaitingConfirmation { return Theme.amber }
+        return Theme.accent
+    }
+
+    private var dockIcon: String {
+        if timer.isPending { return "hourglass" }
+        if timer.isAwaitingConfirmation { return "checkmark.circle" }
+        if timer.isLockedSession { return "lock.fill" }
+        return timer.isStopwatch ? "stopwatch" : "timer"
+    }
+
+    private var dockCaption: String {
+        if timer.isPending {
+            return timer.pendingStart?.task?.title ?? "Starting soon"
+        }
+        if timer.isAwaitingConfirmation { return "Time's up — finish or extend" }
+        return timer.currentTaskTitle ?? (timer.isStopwatch ? "Stopwatch" : "Focus session")
+    }
+
+    /// What this session needs next, as one button. A locked session gets
+    /// none: the whole point of it is that there is nothing to press.
+    private var dockAction: (title: String, tint: Color, run: () -> Void)? {
+        if timer.isPending {
+            return ("Cancel", Theme.danger, { timer.cancelPendingStart() })
+        }
+        if timer.isAwaitingConfirmation {
+            return ("Finish Session", Theme.accent, { timer.finishAwaited() })
+        }
+        if timer.isLockedSession { return nil }
+        if timer.isStopwatch {
+            return ("Stop & Bank", Theme.accent, { timer.stopStopwatch() })
+        }
+        return ("Give Up", Theme.danger, { timer.giveUp() })
+    }
+
     // MARK: - Content
 
     private var content: some View {
@@ -233,6 +296,7 @@ struct MainView: View {
                 case .focus: FocusView()
                 case .schedule: ScheduleView()
                 case .tasks: TasksView()
+                case .events: EventsView()
                 case .flashcards: FlashcardsView()
                 case .notes: NotesView()
                 case .stats: StatsView()

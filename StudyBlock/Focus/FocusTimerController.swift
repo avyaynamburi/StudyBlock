@@ -43,6 +43,20 @@ struct SessionTaskPlacement: Identifiable, Equatable {
     var wasManual: Bool
 }
 
+/// A session that has been set up but hasn't begun yet.
+///
+/// The whole point is the gap between deciding to work and being ready to:
+/// set the session up, then walk to the desk, fetch the book, shut the door.
+/// The block goes on when the session does, not now — blocking sites while
+/// you are still getting ready would only punish the getting ready.
+struct PendingStart: Equatable {
+    var fireDate: Date
+    var mode: FocusMode
+    var minutes: Int
+    var locked: Bool
+    var task: TodoItem?
+}
+
 /// Drives focus sessions: countdown, auto-block on start, auto-unblock on
 /// end, stats recording, and completion notification. Sessions can be
 /// **locked** (helper-enforced: no early unblock, hosts tampering reverted)
@@ -51,6 +65,9 @@ struct SessionTaskPlacement: Identifiable, Equatable {
 @MainActor
 final class FocusTimerController: ObservableObject {
     static let presetMinutes = [25, 45, 50]
+    /// How long a session can be put off for. Past half an hour it stops
+    /// being "let me get set up" and becomes a reminder, which this isn't.
+    static let startDelayChoices = [0, 1, 5, 10, 15, 30]
     /// Offered when a session that has run out asks whether to keep going.
     static let extendMinutes = [5, 10, 15, 30]
 
@@ -95,11 +112,21 @@ final class FocusTimerController: ObservableObject {
     /// the task belongs back where it came from either way.
     @Published var taskToRestore: SessionTaskPlacement?
 
+    /// The session waiting to begin, if one was scheduled for later.
+    ///
+    /// Deliberately *not* persisted, unlike a running session. A pending
+    /// start is a promise about the next few minutes; restoring one after a
+    /// relaunch an hour later would ambush the user with a block they set up
+    /// and forgot. Quitting the app cancels it.
+    @Published private(set) var pendingStart: PendingStart?
+    @Published private(set) var pendingRemaining: TimeInterval = 0
+
     private let blocker: BlockerViewModel
     private let stats: StatsStore
     private var startDate: Date?
     private var blockingWasOnBefore = false
     private var ticker: Timer?
+    private var pendingTicker: Timer?
     /// Last time the helper actually answered a health check during a locked
     /// session; nil when not tracking (no locked session running).
     private var lastHelperContact: Date?
@@ -227,6 +254,61 @@ final class FocusTimerController: ObservableObject {
         }
     }
 
+    /// "Now", "5 min" — how a delay is written wherever it is offered.
+    static func delayLabel(_ minutes: Int) -> String {
+        minutes <= 0 ? "Now" : "\(minutes) min"
+    }
+
+    var isPending: Bool { pendingStart != nil }
+
+    /// The countdown to the start, as a clock.
+    var pendingLabel: String { Self.clock(pendingRemaining) }
+
+    /// Sets a session going, either now or in `delayMinutes`.
+    ///
+    /// One entry point for both so callers don't branch: a delay of zero is
+    /// simply a session that starts immediately, which is what every caller
+    /// wanted before this existed.
+    func schedule(mode: FocusMode, minutes: Int, task: TodoItem? = nil,
+                  locked: Bool = false, delayMinutes: Int) {
+        guard !isRunning else { return }
+        cancelPendingStart()
+        guard delayMinutes > 0 else {
+            start(mode: mode, minutes: minutes, task: task, locked: locked)
+            return
+        }
+        pendingStart = PendingStart(fireDate: Date().addingTimeInterval(TimeInterval(delayMinutes * 60)),
+                                    mode: mode, minutes: minutes, locked: locked, task: task)
+        pendingRemaining = TimeInterval(delayMinutes * 60)
+        pendingTicker?.invalidate()
+        pendingTicker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.tickPending() }
+        }
+    }
+
+    func cancelPendingStart() {
+        pendingTicker?.invalidate()
+        pendingTicker = nil
+        pendingStart = nil
+        pendingRemaining = 0
+    }
+
+    /// Stops waiting and begins the session now — the countdown was a
+    /// convenience, not a commitment.
+    func startPendingNow() {
+        guard let pending = pendingStart else { return }
+        cancelPendingStart()
+        start(mode: pending.mode, minutes: pending.minutes, task: pending.task, locked: pending.locked)
+    }
+
+    private func tickPending() {
+        guard let pending = pendingStart else { return }
+        pendingRemaining = max(0, pending.fireDate.timeIntervalSinceNow)
+        guard pendingRemaining <= 0 else { return }
+        startPendingNow()
+    }
+
     /// Ends the session early. No-op for locked sessions — that's the point.
     func giveUp() {
         guard !isLockedSession else { return }
@@ -267,6 +349,7 @@ final class FocusTimerController: ObservableObject {
     // MARK: - Internals
 
     private func startSession(mode: FocusMode, minutes: Int, task: TodoItem?, locked: Bool) async {
+        cancelPendingStart()
         // Tells background automation (the block schedule) to keep its hands
         // off the block until this session ends.
         blocker.isSessionManaged = true

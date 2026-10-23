@@ -11,6 +11,7 @@ struct StudyBlockApp: App {
     @StateObject private var tasks = TaskStore()
     @StateObject private var decks = DeckStore()
     @StateObject private var notes = NotesStore()
+    @StateObject private var events = EventStore()
     @StateObject private var canvas = CanvasSync()
     @Environment(\.openWindow) private var openWindow
 
@@ -37,6 +38,7 @@ struct StudyBlockApp: App {
                 .environmentObject(tasks)
                 .environmentObject(decks)
                 .environmentObject(notes)
+                .environmentObject(events)
                 .environmentObject(canvas)
         }
         .windowStyle(.hiddenTitleBar)
@@ -52,6 +54,12 @@ struct StudyBlockApp: App {
                         Button("\(extra) more minutes") { timer.extend(by: extra) }
                     }
                 }
+            } else if timer.isPending {
+                // A session set up for later still has to be visible and
+                // cancellable from outside the window.
+                Text("Starting in \(timer.pendingLabel)")
+                Button("Start Now") { timer.startPendingNow() }
+                Button("Cancel") { timer.cancelPendingStart() }
             } else if timer.isRunning {
                 Text(timer.isStopwatch
                      ? "Stopwatch — \(timer.elapsedLabel) so far"

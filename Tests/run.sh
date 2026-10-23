@@ -46,6 +46,7 @@ build taskmerge    ${APP_SRC} Tests/TaskMergeTests.swift        && run taskmerge
 build stats        ${APP_SRC} Tests/StatsTests.swift            && run stats stats-sandbox
 build focus        ${APP_SRC} Tests/FocusSessionTests.swift     && run focus focus-sandbox
 build board        ${APP_SRC} Tests/BoardTests.swift            && run board board-sandbox
+build events       ${APP_SRC} Tests/EventsTests.swift           && run events events-sandbox
 
 if [ "$FAILED" -eq 0 ]; then echo "all suites passed"; else echo "SOME SUITES FAILED"; fi
 exit $FAILED

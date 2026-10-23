@@ -6,10 +6,9 @@ import SwiftUI
 /// common case is reading it and pressing Merge — but nothing is applied
 /// until that press, and every choice can be flipped first.
 struct TaskMergeSheet: View {
-    /// The card the merge started from. When `partner` is nil the sheet opens
-    /// on a picker instead, so "Merge with…" and a drop both land here.
+    /// The card "Merge With…" was chosen on. The sheet opens on a picker for
+    /// the other one.
     let primary: TodoItem
-    var partner: TodoItem?
     let candidates: [TodoItem]
     var courseColor: (String) -> Color = { _ in Theme.accent }
     let onMerge: (TaskMergePlan) -> Void
@@ -17,17 +16,6 @@ struct TaskMergeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var plan: TaskMergePlan?
     @State private var search = ""
-
-    init(primary: TodoItem, partner: TodoItem? = nil, candidates: [TodoItem],
-         courseColor: @escaping (String) -> Color = { _ in Theme.accent },
-         onMerge: @escaping (TaskMergePlan) -> Void) {
-        self.primary = primary
-        self.partner = partner
-        self.candidates = candidates
-        self.courseColor = courseColor
-        self.onMerge = onMerge
-        _plan = State(initialValue: partner.map { TaskMergePlan.autofilled(primary, $0) })
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -286,7 +274,7 @@ struct TaskMergeSheet: View {
 
     private var footer: some View {
         HStack {
-            if plan != nil, partner == nil {
+            if plan != nil {
                 Button("Back") { plan = nil }
                     .buttonStyle(SoftPillButtonStyle())
             }
